@@ -1,0 +1,37 @@
+{
+  "title": "Project Falcon Review",
+  "palette": "teal",
+  "slides": [
+    {"type": "title", "title": "Project Falcon Review", "subtitle": "Pilot results, sales and next steps", "footer": "Test deck - every slide type"},
+    {"type": "section", "title": "Pilot results", "subtitle": "What changed in the first quarter", "icon": "1"},
+    {"type": "bullets", "title": "Summary", "kicker": "Overview",
+     "bullets": ["Speed: processing time down 40% in the pilot", "Onboarding: new teams productive in days, not weeks", "Cost: lower cloud spend after moving batch jobs", "Reliability: 99.9% uptime across the pilot", "Adoption: 1,200 users by end of quarter", "Feedback: most requests are for more integrations", "Risk: single region deployment still"],
+     "callout": "Next review: after the Q3 rollout to two more regions.", "notes": "Seven bullets so this splits onto a continuation slide."},
+    {"type": "bullets", "title": "Quarterly revenue", "bullets": ["Q4 best quarter: 24 units", "Q2 strong start", "Q3 dip from a delayed release"], "image": "assets/image1.png"},
+    {"type": "cards", "title": "Why it worked", "cards": [
+      {"title": "Faster onboarding", "text": "Templates and defaults remove most of the setup work."},
+      {"title": "Lower cost", "text": "Batch jobs run on spot capacity overnight."},
+      {"title": "Fewer incidents", "text": "Health checks catch bad deploys before users notice."}]},
+    {"type": "cards", "title": "Four focus areas", "cards": [
+      {"title": "Security", "text": "SSO everywhere by Q3.", "icon": "S"},
+      {"title": "Scale", "text": "Second region live.", "icon": "R"},
+      {"title": "Support", "text": "24h response target.", "icon": "H"},
+      {"title": "Docs", "text": "Every API documented with examples.", "icon": "D"}]},
+    {"type": "steps", "title": "Rollout plan", "steps": [
+      {"title": "Prepare", "text": "Freeze config, back up data, notify teams."},
+      {"title": "Migrate", "text": "Move one team at a time, verify each before the next."},
+      {"title": "Monitor", "text": "Watch error rates and latency for 48 hours."},
+      {"title": "Close out", "text": "Remove the old system and update docs."}]},
+    {"type": "stats", "title": "Pilot in numbers", "stats": [{"value": "40%", "label": "faster processing"}, {"value": "1,200", "label": "active users"}, {"value": "99.9%", "label": "uptime"}], "text": "Source: pilot report, table 1."},
+    {"type": "code", "title": "Deploy command", "lang": "PowerShell", "note": "Run as Administrator: the script registers a Windows service.",
+     "code": ".\\deploy.ps1 -Env prod `\n  -Region west `\n  -Confirm"},
+    {"type": "table", "title": "Sales by region", "header": ["Quarter", "North", "South"], "rows": [["Q1", "12", "9"], ["Q2", "19", "14"], ["Q3", "15", "18"], ["Q4", "24", "21"]]},
+    {"type": "chart", "title": "Sales by region", "chart": "column", "categories": ["Q1", "Q2", "Q3", "Q4"],
+     "series": [{"name": "North", "values": [12, 19, 15, 24]}, {"name": "South", "values": [9, 14, 18, 21]}],
+     "text": "South overtook North in Q3: new distributor signed in July."},
+    {"type": "chart", "title": "Share of Q4 sales", "chart": "pie", "categories": ["North", "South"], "series": [{"name": "Q4", "values": [24, 21]}]},
+    {"type": "chart", "title": "Trend", "chart": "line", "categories": ["Q1", "Q2", "Q3", "Q4"], "series": [{"name": "North", "values": [12, 19, 15, 24]}]},
+    {"type": "image", "title": "Scanned approval memo", "image": "assets/scan.png", "caption": "Budget approval, scanned copy", "bullets": ["Approved for 2026", "Covers both regions"]},
+    {"type": "closing", "title": "Takeaways", "items": ["Pilot hit every target", "Roll out region by region", "Next review after Q3"]}
+  ]
+}
