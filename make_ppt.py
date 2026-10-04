@@ -992,9 +992,11 @@ def render_previews(deck: Path, outdir: Path) -> list[Path]:
     if not Path(SOFFICE).exists():
         log.warning("LibreOffice not found at %s - skipping previews", SOFFICE)
         return []
-    if outdir.exists():
-        shutil.rmtree(outdir)
-    outdir.mkdir(parents=True)
+    # Reuse the folder: deleting and recreating it right away fails on Windows with
+    # "Access is denied" (the delete is still pending, or Explorer has the folder open).
+    outdir.mkdir(parents=True, exist_ok=True)
+    for old in [*outdir.glob("slide-*.png"), outdir / "contact-sheet.png"]:
+        old.unlink(missing_ok=True)
     with tempfile.TemporaryDirectory() as tmp:
         src = Path(tmp) / "deck.pptx"
         shutil.copy2(deck, src)
@@ -1028,7 +1030,12 @@ def build(spec_path: Path, out: Path | None, preview: bool = True, animate: bool
     for w in deck.warnings:
         print(f"  warning: {w}")
     if preview:
-        pngs = render_previews(out, base / "preview")
+        try:
+            pngs = render_previews(out, base / "preview")
+        except (OSError, subprocess.SubprocessError) as e:  # previews are a convenience, the deck is done
+            log.warning("deck saved, but previews could not be made (%s) - close the preview folder or "
+                        "any open slide images and rebuild to get them", e)
+            pngs = []
         if pngs:
             print(f"Previews: {pngs[0].parent} (contact-sheet.png shows all slides)")
     return out

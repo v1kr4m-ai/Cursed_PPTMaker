@@ -144,3 +144,20 @@
   the cloud side retires it. ask_ollama now recognises "retired"/HTTP 410, explains it, suggests
   `ollama rm <model>`, and records the model in .retired_models (gitignored); the app hides those
   from both menus. Verified with glm-5:cloud.
+
+## 2026-10-04 — Fix: PermissionError on the preview folder
+- User hit "[WinError 5] Access is denied: ...\<name>_ppt\preview". render_previews did
+  rmtree(preview) + mkdir immediately: on Windows the delete can still be pending (or Explorer /
+  a viewer holds the folder), so mkdir/rmtree fails.
+- Now reuses the folder (mkdir exist_ok) and deletes only old slide-*.png / contact-sheet.png;
+  build() treats preview failures as a warning - the deck is already saved.
+- Tested: back-to-back rebuilds; a preview PNG held open -> deck saved + clear warning, exit 0.
+
+## 2026-10-04 — README + previews refreshed
+- App screenshots (docs/images/app-result.png, app-running.png) rendered off-screen with headless
+  Edge from demo copies of ui/index.html with a mocked pywebview API and made-up data, so no
+  personal windows, notifications or paths can appear. (Gotchas: plain --headless works; one
+  --user-data-dir per run or later runs silently hand off; --force-device-scale-factor broke it.)
+- Example slide previews regenerated from the current renderer.
+- README: app screenshots, online/image-model features, troubleshooting rows for preview folder,
+  retired cloud models, API key/quota, image-model fallback, 30-minute timeout.

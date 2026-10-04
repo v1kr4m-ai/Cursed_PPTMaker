@@ -8,6 +8,10 @@ goes on each slide. A Python renderer turns that into a styled `.pptx` with card
 numbered steps, stat callouts, code blocks, native charts and fade animations.
 No cloud API, no account, no internet needed once it is set up.
 
+![The Cursed PPTMaker desktop app with a finished deck](docs/images/app-result.png)
+
+*Above: the desktop app. Below: a deck it built.*
+
 ![Example deck built by Cursed_PPTMaker](docs/images/example-deck.png)
 
 ---
@@ -56,6 +60,9 @@ No cloud API, no account, no internet needed once it is set up.
   *File → Info → Properties → Comments*.
 - **Desktop app:** a frosted-glass window with drag-and-drop, a model picker that knows
   what fits in memory, live progress, slide thumbnails and a choice of save folder.
+- **Optional online models:** Ollama cloud models or any OpenAI-compatible API (OpenAI,
+  Gemini, OpenRouter, Groq, Anthropic…), clearly marked, with keys encrypted by Windows.
+- **Choosable image model:** local vision models by default; online ones if you want.
 - **Console launcher** too, for a no-frills double-click workflow.
 
 ## How it works
@@ -126,6 +133,8 @@ Everything is downloaded once. After that, the whole pipeline runs without inter
 ## Usage
 
 ### Desktop app
+
+![The app while it builds a deck](docs/images/app-running.png)
 
 Double-click **`Cursed PPTMaker.bat`** (it starts `app.py` without a console window).
 
@@ -360,6 +369,11 @@ The context window is sized to your document, so short documents use less memory
 | `LibreOffice not found` | install it, or set `SOFFICE_PATH`; decks still build, just without previews |
 | Scanned PDF gives no text | install Tesseract, or set `TESSERACT_PATH` |
 | `Cannot write … is it open in PowerPoint?` | close the deck in PowerPoint and run again |
+| "deck saved, but previews could not be made" | the deck is fine; close the `preview` folder or any open slide images and press **Rebuild** |
+| "… no longer exists: Ollama retired this cloud model" | pick another model; the retired one is hidden from the menus (remove it with `ollama rm <model>`) |
+| "rejected the API key" / "rate limit or quota reached" | check the key or your plan with that provider; re-enter the key via **+ Add online model…** |
+| "… failed (model can't see images); trying the next vision model" | the chosen image model doesn't accept pictures; a local vision model took over |
+| "did not finish within 30 minutes" | the model is too big for free memory (partly on the CPU) — pick a smaller one or fewer slides |
 | Model keeps failing the checks | the last attempt is saved as `spec.json`; fix it and run `build` |
 | Content is thin or slightly wrong | use a bigger model, add `-i` instructions, or edit `spec.json` |
 
