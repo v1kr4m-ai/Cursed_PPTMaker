@@ -161,3 +161,55 @@
 - Example slide previews regenerated from the current renderer.
 - README: app screenshots, online/image-model features, troubleshooting rows for preview folder,
   retired cloud models, API key/quota, image-model fallback, 30-minute timeout.
+
+## 2026-10-04 — Designs from pictures (PPT_Designs/)
+- designs.py: picture -> theme. Background = most common border colour; accents = clusters of
+  strongly saturated pixels only (median-cut on vivid pixels), so small coloured icons/bars aren't
+  averaged into grey; monochrome designs fall back to their darkest tones. Light grey low-saturation
+  canvas -> "soft" (raised cards). Title/closing dark = neutral near-black from the image, else a
+  deep shade of the background (darkest pixel is often a photo/shadow detail - was brown).
+- make_ppt: spec "theme" overrides palette: slide bg, cards, headings/body text (flip on dark
+  themes), tables, chart text/gridlines/series, captions; soft themes add an outerShdw to cards;
+  badge text goes dark on light accents. --design for auto/build; apply_design() stores theme.
+- App: Design row (Default + thumbnails + "+" opens folder, reloads on window focus), swatch hint,
+  remembered in .last_design. PPT_Designs/* git-ignored except its README (third-party images).
+- Fixed on the way: "image": null from the model crashed the image safety net; the provenance
+  stamp exceeded PowerPoint's 255-char Comments limit with a design name -> compact " | " format
+  + hard cap; big-number cards no longer stretch to full height.
+- Tested: themes extracted for all 17 designs (swatch sheet checked by eye); example deck in designs
+  4/5/10/13/14/17; full app run (hidden window) Word+Excel with design 5. Restored the user's
+  remembered phi4 / Auto / Default afterwards.
+
+## 2026-10-04 — Design families (replaces colours-from-pictures)
+- User clarified: study the reference designs (shapes, fonts, placement) and build designs
+  organically, not copy colours. Removed designs.py and the picture-theme path.
+- DESIGN_NOTES.md: per-reference analysis of 17 designs + recurring ideas (numbers as graphics,
+  radial structures, geometric containers, soft depth, split compositions, small decorative
+  systems, type pairing) -> six families.
+- families.py: FAMILIES (palette, fonts, flags, variant choices) + FamilyLayouts mixin with
+  covers (t_soft/ribbon/hub/split/wander/band), dividers (sec_bignum/soft/split/wander),
+  steps (ribbons/chevrons/hexsteps), cards (diamonds/hexagons/circles), stats (ring gauges),
+  light closing. Shapes: BLOCK_ARC (angles = deg*0.6 in python-pptx), DONUT, HEXAGON, DIAMOND,
+  CHEVRON/PENTAGON, FLOWCHART_OFFPAGE_CONNECTOR (banner), RIGHT_TRIANGLE (diagonal edge),
+  ellipse-cropped picture. Fonts all ship with Windows (Bahnschrift SemiBold Condensed renders
+  in LibreOffice too).
+- make_ppt: Deck(FamilyLayouts); variant() dispatch per slide type; header decorations per
+  family; text(font=), family radius/soft shadows on any raised shape; --design <family>;
+  `make_ppt.py families` renders ui/families/*.jpg thumbnails. Deck.lead/split_even exposed
+  for the mixin (must be set before main runs).
+- App: Design row shows the families (thumbnail = cover + steps-slide inset), hint = name +
+  description. Tested: example deck in all 6 families (fixed editorial diagonal orientation and
+  soft-cover overlap), full app run in Hexa Hub (hidden window). Restored phi4/Auto/Default.
+
+## 2026-10-04 — Settings drawer (and layout restored)
+- Gear button beside the status badge opens a right-side Settings drawer (same frosted style) with
+  model, image model, design, save folder, animations and "Open the reference designs folder".
+  Main card keeps Sources, a "Using" row of summary chips (click = open drawer at that section),
+  Slides, Focus, Generate.
+- First attempt moved the brand into a new top bar; user said the previous look was perfect ->
+  restored the original composition exactly (brand in the card, badge top-right), gear added
+  next to the badge only.
+- Bug caught by rendering: updateSummary() ran at start-up and called `on` (a const defined
+  later) -> TDZ ReferenceError stopped the whole script (status stuck "Checking Ollama...").
+- Tested in a hidden window: chip opens drawer, both dropdowns fit inside it, summary updates,
+  Done closes. Remembered choices restored to phi4 / Auto / Default.

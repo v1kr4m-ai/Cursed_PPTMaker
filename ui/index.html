@@ -292,6 +292,49 @@
   .saved .row button { color: var(--on-dark-soft); padding: 4px 8px; border-radius: 8px; }
   .saved .row button:hover { background: rgba(255, 107, 107, .15); color: #ffb4b4; }
   .m-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 22px; }
+  /* design picker */
+  .designs { display: flex; gap: 10px; overflow-x: auto; padding: 4px 4px 8px; scroll-snap-type: x proximity; }
+  .dtile { flex: none; width: 132px; height: 74px; padding: 0; border-radius: 14px; overflow: hidden; scroll-snap-align: start;
+           background: linear-gradient(180deg, #f4f6f9, var(--pill)); border: 2px solid transparent;
+           box-shadow: 0 6px 14px rgba(15, 20, 30, .22); transition: transform .15s; }
+  .dtile:hover { transform: translateY(-2px); }
+  .dtile img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .dtile[aria-selected="true"] { border-color: var(--blue); box-shadow: 0 0 0 3px rgba(58, 107, 245, .35), 0 6px 14px rgba(15, 20, 30, .22); }
+  .dtile .def { display: grid; place-items: center; height: 100%; padding: 6px; font-size: 11.5px; font-weight: 600; color: var(--ink); text-align: center; line-height: 1.25; }
+  .dtile.add { display: grid; place-items: center; font-size: 26px; font-weight: 300; color: var(--blue); }
+  .swatches { display: inline-flex; gap: 3px; vertical-align: -2px; margin-right: 6px; }
+  .swatches i { width: 12px; height: 12px; border-radius: 4px; box-shadow: inset 0 0 0 1px rgba(0, 0, 0, .15); }
+  /* header bar + settings drawer */
+  .top-right { display: flex; align-items: center; gap: 10px; flex: none; }
+  .gear { width: 44px; height: 44px; border-radius: 14px; display: grid; place-items: center; color: var(--on-dark);
+          background: var(--dark-pill); border: 1px solid var(--dark-edge); transition: background .2s; }
+  .gear:hover { background: rgba(255, 255, 255, .12); }
+  .gear svg { transition: transform .4s; }
+  .gear:hover svg { transform: rotate(60deg); }
+  .drawer-wrap { position: fixed; inset: 0; z-index: 25; background: rgba(5, 7, 10, .55); backdrop-filter: blur(3px);
+                 opacity: 0; pointer-events: none; transition: opacity .2s; }
+  .drawer-wrap.show { opacity: 1; pointer-events: auto; }
+  .drawer { position: absolute; top: 16px; right: 16px; bottom: 16px; width: min(500px, 92vw); display: flex; flex-direction: column;
+            border-radius: 28px; border: 1px solid var(--glass-edge); color: var(--ink);
+            background: linear-gradient(165deg, rgba(236, 240, 246, .97), rgba(214, 220, 231, .96));
+            box-shadow: 0 30px 80px rgba(0, 0, 0, .55); transform: translateX(40px); transition: transform .25s ease-out; }
+  .drawer-wrap.show .drawer { transform: none; }
+  .drawer-head { display: flex; align-items: center; justify-content: space-between; padding: 22px 24px 6px; }
+  .drawer-head h3 { margin: 0; font: 700 22px var(--font-display); color: var(--ink); }
+  .x.big { width: 34px; height: 34px; font-size: 16px; }
+  .drawer-body { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: 10px 24px 18px; display: flex; flex-direction: column; gap: 20px; }
+  .drawer-foot { padding: 12px 24px 22px; display: flex; justify-content: flex-end; }
+  .toggle-row .toggle { justify-content: space-between; font-size: 13.5px; }
+  .linkbtn { color: var(--blue); font-size: 12.5px; font-weight: 600; margin: 6px 0 0 6px; padding: 0; }
+  .linkbtn:hover { text-decoration: underline; text-underline-offset: 3px; }
+  .linkbtn.inline { margin: 0 0 0 8px; font-size: 12px; }
+  .summary { display: flex; flex-wrap: wrap; gap: 8px; }
+  .schip { display: inline-flex; align-items: center; gap: 7px; max-width: 100%; padding: 8px 12px; border-radius: 12px;
+           font-size: 12.5px; font-weight: 600; color: var(--ink); text-align: left; }
+  .schip .k { color: var(--ink-soft); font-weight: 500; }
+  .schip .v { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 210px; }
+  .schip .dot { width: 8px; height: 8px; }
+  .schip.warn { box-shadow: 0 0 0 1.5px rgba(242, 177, 74, .9), 0 10px 22px rgba(15, 20, 30, .22); }
   ::-webkit-scrollbar { width: 8px; height: 8px; }
   ::-webkit-scrollbar-thumb { background: rgba(120, 130, 145, .45); border-radius: 8px; }
   @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
@@ -310,6 +353,7 @@
       <div><h1>Cursed PPTMaker</h1><small>Documents in, slides out. Offline first.</small></div>
     </div>
 
+
     <div>
       <p class="label">Sources</p>
       <div class="soft drop" id="drop" role="button" tabindex="0" aria-label="Add files">
@@ -321,29 +365,8 @@
     </div>
 
     <div>
-      <p class="label" id="model-label">Model</p>
-      <div class="select" id="select">
-        <button class="soft select-btn" id="select-btn" aria-haspopup="listbox" aria-labelledby="model-label">
-          <span class="dot" id="sel-dot"></span><span class="val" id="sel-val">Loading models…</span>
-          <span class="meta" id="sel-meta"></span>
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#3d4450" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
-        </button>
-        <div class="soft menu" id="menu" role="listbox"></div>
-      </div>
-      <p class="hint" id="mem-hint"></p>
-    </div>
-
-    <div>
-      <p class="label" id="vmodel-label">Image model</p>
-      <div class="select" id="vselect">
-        <button class="soft select-btn" id="vselect-btn" aria-haspopup="listbox" aria-labelledby="vmodel-label">
-          <span class="dot" id="vsel-dot"></span><span class="val" id="vsel-val">Loading…</span>
-          <span class="meta" id="vsel-meta"></span>
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#3d4450" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
-        </button>
-        <div class="soft menu" id="vmenu" role="listbox"></div>
-      </div>
-      <p class="hint" id="v-hint"></p>
+      <p class="label">Using <button class="linkbtn inline" id="summary-edit">Change…</button></p>
+      <div class="summary" id="summary"></div>
     </div>
 
     <div class="row">
@@ -351,24 +374,11 @@
         <div class="slider-top"><span class="label" style="margin:0">Slides</span><output id="n-out">10</output></div>
         <input type="range" id="n" min="4" max="20" value="10" aria-label="Number of slides">
       </div>
-      <div class="toggles">
-        <label class="toggle">Animations <button class="switch" role="switch" aria-checked="true" id="t-anim"></button></label>
-      </div>
     </div>
 
     <div>
       <p class="label"><label for="focus">Focus <span style="font-weight:400;color:#3f4754">(optional)</span></label></p>
       <input class="soft field" id="focus" placeholder="e.g. audience: management, keep it short" autocomplete="off">
-    </div>
-
-    <div>
-      <p class="label" id="out-label">Save to</p>
-      <div class="soft saveto" aria-labelledby="out-label">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#3a6bf5" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
-        <span class="where" id="out-txt"></span>
-        <button class="x" id="out-reset" aria-label="Save next to the first file instead" hidden>✕</button>
-        <button class="mini" id="out-pick">Change</button>
-      </div>
     </div>
 
     <button class="go" id="go" disabled>
@@ -382,7 +392,12 @@
   <section class="side" aria-live="polite">
     <div class="side-head">
       <h2 id="headline">Ready when you are</h2>
+      <div class="top-right">
       <span class="badge" id="status"><span class="dot"></span><span id="status-txt">Checking Ollama…</span></span>
+      <button class="gear" id="settings-btn" aria-label="Settings" title="Settings">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
+      </button>
+      </div>
     </div>
     <p class="sub" id="subline">With an offline model everything runs on this PC.</p>
 
@@ -414,6 +429,64 @@
       <div class="log" id="log"></div>
     </details>
   </section>
+</div>
+
+<div class="drawer-wrap" id="settings" aria-hidden="true">
+  <aside class="drawer" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+    <div class="drawer-head">
+      <h3 id="settings-title">Settings</h3>
+      <button class="x big" id="settings-close" aria-label="Close settings">✕</button>
+    </div>
+    <div class="drawer-body" id="drawer-body">
+    <div id="set-model">
+      <p class="label" id="model-label">Model</p>
+      <div class="select" id="select">
+        <button class="soft select-btn" id="select-btn" aria-haspopup="listbox" aria-labelledby="model-label">
+          <span class="dot" id="sel-dot"></span><span class="val" id="sel-val">Loading models…</span>
+          <span class="meta" id="sel-meta"></span>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#3d4450" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+        </button>
+        <div class="soft menu" id="menu" role="listbox"></div>
+      </div>
+      <p class="hint" id="mem-hint"></p>
+    </div>
+
+    <div id="set-vision">
+      <p class="label" id="vmodel-label">Image model</p>
+      <div class="select" id="vselect">
+        <button class="soft select-btn" id="vselect-btn" aria-haspopup="listbox" aria-labelledby="vmodel-label">
+          <span class="dot" id="vsel-dot"></span><span class="val" id="vsel-val">Loading…</span>
+          <span class="meta" id="vsel-meta"></span>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#3d4450" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+        </button>
+        <div class="soft menu" id="vmenu" role="listbox"></div>
+      </div>
+      <p class="hint" id="v-hint"></p>
+    </div>
+
+    <div id="set-design">
+      <p class="label" id="design-label">Design</p>
+      <div class="designs" id="designs" role="listbox" aria-labelledby="design-label"></div>
+      <p class="hint" id="d-hint"></p>
+      <button class="linkbtn" id="open-refs">Open the reference designs folder</button>
+    </div>
+
+    <div id="set-outdir">
+      <p class="label" id="out-label">Save to</p>
+      <div class="soft saveto" aria-labelledby="out-label">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#3a6bf5" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
+        <span class="where" id="out-txt"></span>
+        <button class="x" id="out-reset" aria-label="Save next to the first file instead" hidden>✕</button>
+        <button class="mini" id="out-pick">Change</button>
+      </div>
+    </div>
+
+    <div id="set-anim" class="toggle-row">
+        <label class="toggle">Animations <button class="switch" role="switch" aria-checked="true" id="t-anim"></button></label>
+    </div>
+    </div>
+    <div class="drawer-foot"><button class="mini" id="settings-done">Done</button></div>
+  </aside>
 </div>
 
 <div class="modal" id="modal" role="dialog" aria-modal="true" aria-labelledby="m-title">
@@ -533,6 +606,7 @@ function chooseModel(name) {
     hint.className = "hint warn";
   }
   refreshStatus();
+  updateSummary();
   updateGo();
 }
 
@@ -597,6 +671,7 @@ function chooseVision(name) {
     : online ? `Online: your pictures will be sent to ${v.provider}.`
     : "Describes pictures on this PC.";
   refreshStatus();
+  updateSummary();
 }
 function refreshStatus() {
   const m = state.models.find(x => x.name === state.model);
@@ -610,6 +685,84 @@ function refreshStatus() {
 $("vselect-btn").onclick = e => { e.stopPropagation(); $("select").classList.remove("open");
   $("vselect").classList.contains("open") ? $("vselect").classList.remove("open") : openMenu("vselect"); };
 document.addEventListener("click", () => $("vselect").classList.remove("open"));
+
+/* ---------- design (colours + style from a picture) ---------- */
+async function loadDesigns() {
+  const r = await pywebview.api.list_designs();
+  state.designs = r.designs;
+  const tile = (id, inner, title) => {
+    const b = document.createElement("button");
+    b.className = "dtile"; b.setAttribute("role", "option"); b.dataset.id = id; b.title = title;
+    b.innerHTML = inner;
+    b.onclick = () => chooseDesign(id);
+    return b;
+  };
+  const tiles = [tile("", '<span class="def">Default<br>style</span>', "The app's own style")];
+  for (const d of r.designs) {
+    const b = tile(d.id, d.thumb ? "<img alt=''>" : '<span class="def"></span>', d.name);
+    if (d.thumb) b.querySelector("img").src = d.thumb; else b.querySelector(".def").textContent = d.name;
+    tiles.push(b);
+  }
+  $("designs").replaceChildren(...tiles);
+  const keep = state.design !== undefined && (state.design === "" || r.designs.some(d => d.id === state.design));
+  chooseDesign(keep ? state.design : r.default);
+}
+function chooseDesign(id) {
+  state.design = id;
+  for (const b of $("designs").querySelectorAll(".dtile[data-id]")) {
+    b.setAttribute("aria-selected", b.dataset.id === id);
+    if (b.dataset.id === id) b.scrollIntoView({ inline: "nearest", block: "nearest" });
+  }
+  const d = state.designs.find(x => x.id === id), hint = $("d-hint");
+  if (!d) { hint.textContent = "Default style — the model picks a colour palette to suit the topic."; updateSummary(); return; }
+  hint.innerHTML = '<span class="swatches"></span><span></span>';
+  hint.querySelector(".swatches").replaceChildren(...d.swatches.map(c => { const i = document.createElement("i"); i.style.background = "#" + c; return i; }));
+  hint.lastChild.textContent = `${d.name} — ${d.about}`;
+  updateSummary();
+}
+
+/* ---------- header settings drawer + summary chips ---------- */
+function openSettings(section) {
+  $("settings").classList.add("show"); $("settings").setAttribute("aria-hidden", "false");
+  const target = section && $("set-" + section);
+  if (target) setTimeout(() => target.scrollIntoView({ block: "start", behavior: "smooth" }), 120);
+  else $("settings-close").focus();
+}
+function closeSettings() {
+  $("settings").classList.remove("show"); $("settings").setAttribute("aria-hidden", "true");
+  $("select").classList.remove("open"); $("vselect").classList.remove("open");
+}
+$("settings-btn").onclick = () => openSettings();
+$("summary-edit").onclick = () => openSettings();
+$("settings-close").onclick = closeSettings;
+$("settings-done").onclick = closeSettings;
+$("settings").onclick = e => { if (e.target === $("settings")) closeSettings(); };
+$("open-refs").onclick = () => pywebview.api.open_designs_folder();
+function updateSummary() {
+  const el = $("summary");
+  if (!el) return;
+  const m = (state.models || []).find(x => x.name === state.model);
+  const v = typeof visionInfo === "function" ? visionInfo(state.visionModel ?? "auto") : null;
+  const d = (state.designs || []).find(x => x.id === state.design);
+  const folder = state.outdir ? state.outdir.split(/[\\/]/).filter(Boolean).pop() : "next to the first file";
+  const chips = [
+    ["model", "Model", m ? m.label : "—", m ? (m.kind === "local" ? (m.fits ? "" : "no") : "net") : "no", m && m.kind === "local" && !m.fits],
+    ["vision", "Images", v ? (v.kind === "auto" ? `Auto · ${state.visionAuto || "none"}` : v.label) : "—",
+     v ? (v.kind === "off" ? "no" : v.kind === "cloud" || v.kind === "api" ? "net" : "") : "no", false],
+    ["design", "Design", d ? d.name : "Default style", null, false],
+    ["outdir", "Save", folder, null, false],
+  ];
+  if ($("t-anim").getAttribute("aria-checked") !== "true") chips.push(["anim", "Animations", "off", null, false]);
+  el.replaceChildren(...chips.map(([sec, k, val, dot, warn]) => {
+    const b = document.createElement("button");
+    b.className = "soft schip" + (warn ? " warn" : "");
+    b.title = warn ? "This model may not fit in free memory right now" : `Change ${k.toLowerCase()}`;
+    b.innerHTML = (dot !== null ? `<span class="dot ${dot}"></span>` : "") + `<span class="k"></span><span class="v"></span>`;
+    b.querySelector(".k").textContent = k; b.querySelector(".v").textContent = val;
+    b.onclick = () => openSettings(sec);
+    return b;
+  }));
+}
 
 /* ---------- add-provider dialog ---------- */
 const slug = s => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "provider";
@@ -670,7 +823,7 @@ $("m-save").onclick = async () => {
   if (state.modalTarget === "vision") chooseVision(r.model); else chooseModel(r.model);
 };
 function openMenu(id) {
-  const sel = $(id), body = $("panel-body").getBoundingClientRect();
+  const sel = $(id), body = sel.closest(".panel-body, .drawer-body").getBoundingClientRect();
   const btn = sel.querySelector(".select-btn").getBoundingClientRect();
   const below = body.bottom - btn.bottom - 14, above = btn.top - body.top - 14;
   const up = below < 240 && above > below;
@@ -697,6 +850,7 @@ function setOutdir(path, save) {
   el.title = state.outdir || "The deck and its working folder are saved beside your first source file";
   $("out-reset").hidden = !state.outdir;
   if (save) pywebview.api.set_outdir(state.outdir);
+  updateSummary();
 }
 $("out-pick").onclick = async () => { const p = await pywebview.api.pick_folder(); if (p) setOutdir(p, true); };
 $("out-reset").onclick = () => setOutdir("", true);
@@ -706,7 +860,7 @@ setOutdir("", false);
 const slider = $("n");
 function paintSlider() { slider.style.setProperty("--p", ((slider.value - slider.min) / (slider.max - slider.min) * 100) + "%"); $("n-out").textContent = slider.value; }
 slider.oninput = paintSlider; paintSlider();
-for (const id of ["t-anim"]) $(id).onclick = e => { e.preventDefault(); const t = $(id); t.setAttribute("aria-checked", t.getAttribute("aria-checked") !== "true"); };
+for (const id of ["t-anim"]) $(id).onclick = e => { e.preventDefault(); const t = $(id); t.setAttribute("aria-checked", t.getAttribute("aria-checked") !== "true"); updateSummary(); };
 const on = id => $(id).getAttribute("aria-checked") === "true";
 
 function updateGo() {
@@ -720,7 +874,7 @@ slider.addEventListener("input", updateGo);
 $("go").onclick = async () => {
   resetRun("Building your deck");
   await pywebview.api.generate({ files: state.files, model: state.model, slides: +slider.value,
-                                 focus: $("focus").value, animate: on("t-anim"), vision: state.visionModel ?? "auto",
+                                 focus: $("focus").value, animate: on("t-anim"), vision: state.visionModel ?? "auto", design: state.design || "",
                                  outdir: state.outdir });
 };
 
@@ -787,9 +941,10 @@ $("b-folder").onclick = () => pywebview.api.open_path(state.last.folder);
 $("b-edit").onclick = () => pywebview.api.edit_spec(state.last.spec);
 $("b-rebuild").onclick = async () => { const spec = state.last.spec; resetRun("Rebuilding from your edits"); await pywebview.api.rebuild(spec); };
 $("lightbox").onclick = () => $("lightbox").classList.remove("show");
-document.addEventListener("keydown", e => { if (e.key === "Escape") { $("lightbox").classList.remove("show"); $("select").classList.remove("open"); $("vselect").classList.remove("open"); closeModal(); } });
+document.addEventListener("keydown", e => { if (e.key === "Escape") { $("lightbox").classList.remove("show"); $("select").classList.remove("open"); $("vselect").classList.remove("open"); closeModal(); closeSettings(); } });
 
 window.addEventListener("pywebviewready", loadModels);
+window.addEventListener("pywebviewready", loadDesigns);
 </script>
 </body>
 </html>

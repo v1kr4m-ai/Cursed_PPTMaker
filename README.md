@@ -63,6 +63,8 @@ No cloud API, no account, no internet needed once it is set up.
 - **Optional online models:** Ollama cloud models or any OpenAI-compatible API (OpenAI,
   Gemini, OpenRouter, Groq, Anthropic…), clearly marked, with keys encrypted by Windows.
 - **Choosable image model:** local vision models by default; online ones if you want.
+- **Six design families:** original slide designs — Soft Dashboard, Ribbon Steps, Hexa Hub,
+  Editorial Mono, Wanderlust, Timeline Flow — each with its own shapes, fonts and layouts.
 - **Console launcher** too, for a no-frills double-click workflow.
 
 ## How it works
@@ -138,12 +140,18 @@ Everything is downloaded once. After that, the whole pipeline runs without inter
 
 Double-click **`Cursed PPTMaker.bat`** (it starts `app.py` without a console window).
 
+The main card holds only what you change every time: **Sources**, a **Using** row of chips
+showing your current model, image model, design and save folder, **Slides**, **Focus** and
+**Generate**. Everything else lives in **⚙ Settings** (top right, next to the status badge);
+click any chip to jump straight to that setting.
+
 | Area | What you can do |
 |---|---|
 | **Sources** | drop files onto the window, or click to browse; remove any with ✕ |
 | **Model** | grouped as *On this PC* (offline, with sizes; blue dot = fits in free memory now, grey = may not), *Ollama cloud* and *API providers* (online, amber dot); **+ Add online model…** adds an API provider |
 | **Slides / Focus** | slide count (4–20) and optional guidance such as `audience: management` |
 | **Image model** | which model describes your pictures: *Auto* (best local vision model), *Off*, a specific local vision model, an Ollama cloud vision model, or an API model that accepts images; online choices are marked amber |
+| **Design** | *Default style* or one of six design families, shown as live previews; each has its own covers, section slides, step/card/number layouts, fonts and colours |
 | **Animations** | fade transitions and entrance animations on or off |
 | **Save to** | choose a folder for the deck and its working files, or ✕ to save next to the first source file (remembered between sessions) |
 | **Progress** | four steps light up as it reads, looks at pictures, writes and builds; *Details* shows the full log |
@@ -202,6 +210,7 @@ python make_ppt.py schema
 | `--no-vision` | auto, extract | don't describe pictures |
 | `--no-animate` | auto, build | no transitions or animations |
 | `--no-preview` | auto, build | skip the PNG previews |
+| `--design NAME` | auto, build | design family: `soft`, `ribbon`, `hexa`, `editorial`, `wander`, `flow` |
 
 ### Output
 
@@ -279,6 +288,30 @@ prints the full format):
 - `"animate": false` at the top level turns animations off.
 - [`examples/spec.json`](examples/spec.json) uses every slide type.
 
+## Design families
+
+Six original designs, built from a study of the reference pictures in `PPT_Designs/`
+(see [DESIGN_NOTES.md](DESIGN_NOTES.md) for what was examined — shapes, fonts, placement).
+Nothing is copied: every family is drawn from scratch with editable PowerPoint shapes.
+
+![The six design families](docs/images/families.png)
+
+| Family | Covers & dividers | Steps | Cards | Big numbers | Fonts |
+|---|---|---|---|---|---|
+| **Soft Dashboard** | light cover with a raised gauge circle; floating card dividers | rows | raised cards | ring gauges | Century Gothic + Segoe UI |
+| **Ribbon Steps** | hanging banner ribbons "01 STEP"; giant-numeral dividers | banner ribbons | layered diamonds | cards | Bahnschrift Condensed caps |
+| **Hexa Hub** | segmented ring around a monogram hub; giant numerals | hexagons | hexagon honeycomb | ring gauges | Bahnschrift Condensed caps |
+| **Editorial Mono** | black panel with a diagonal edge; serif numerals | rows | square cards | cards | Georgia + Segoe UI |
+| **Wanderlust** | warm paper, organic circles framing your first picture; "Chapter" dividers | rows | circle badges | cards | Georgia + Segoe UI |
+| **Timeline Flow** | dark band cover with chevrons; giant numerals | chevron arrows | cards | cards | Segoe UI + Bahnschrift |
+
+Every family also has its own header detail (three dots and a page-number circle, colour
+stripes, hexagon dots, a thin rule, a kicker line, or an accent bar) and its own colours for
+tables and charts. All fonts ship with Windows, so decks look the same offline.
+
+Pick one in the app's **Design** row, or `--design soft|ribbon|hexa|editorial|wander|flow`.
+After changing a family, `python make_ppt.py families` refreshes the preview thumbnails.
+
 ## Hindi and other scripts
 
 ![Scanned Hindi page in, Hindi deck out](docs/images/hindi-deck.png)
@@ -332,8 +365,8 @@ Yes, with an offline model (the default), once installed:
   them; the CLI warns if you pass one.
 - Every deck says how it was made, in *File → Info → Properties → Comments*, e.g.
 
-  > Made OFFLINE by make_ppt.py on 2026-10-03. Slide content: qwen3:8b (Ollama).
-  > Image descriptions: llama3.2-vision:latest. OCR: Tesseract hin+eng.
+  > Made OFFLINE by make_ppt.py 2026-10-03 | Slides: qwen3:8b (Ollama, local) |
+  > Images: llama3.2-vision:latest (Ollama, local) | OCR: hin+eng | Design: …
 
 ## Choosing a model
 
@@ -395,6 +428,10 @@ Cursed_PPTMaker/
 ├── make_ppt.py            # extract, build, auto, schema — the whole pipeline
 ├── app.py                # desktop app: window + bridge to make_ppt (pywebview)
 ├── providers.py          # online API providers: OpenAI-compatible calls, DPAPI-encrypted keys
+├── families.py           # the six design families: palettes, fonts and layout variants
+├── DESIGN_NOTES.md       # the design study the families were built from
+├── ui/families/          # preview thumbnails (python make_ppt.py families)
+├── PPT_Designs/          # reference pictures used for the study (not committed)
 ├── ui/index.html         # the app's interface (HTML/CSS/JS, fully offline)
 ├── Cursed PPTMaker.bat   # starts the desktop app
 ├── make_ppt_launcher.ps1  # console front end: file picker, model menu, Ollama start-up

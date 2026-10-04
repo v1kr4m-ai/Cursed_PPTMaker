@@ -28,11 +28,13 @@ from PIL import Image
 from webview.dom import DOMEventHandler
 
 import make_ppt as mp
+from families import FAMILIES
 import providers
 
 HERE = Path(__file__).resolve().parent
 LAST_MODEL = HERE / ".last_model"   # shared with the console launcher
 LAST_VISION = HERE / ".last_vision"  # image model: "auto", "" (off) or a model id
+LAST_DESIGN = HERE / ".last_design"  # chosen design family key; empty = default style
 LAST_OUTDIR = HERE / ".last_outdir"  # chosen "Save to" folder; empty/missing = next to the source
 NO_WINDOW = 0x08000000               # CREATE_NO_WINDOW: no console flashes under pythonw
 SUPPORTED = (mp.IMAGE_EXT | set(mp.LEGACY) |
@@ -206,6 +208,24 @@ class Api:
                 "vision": vision, "vision_default": vision_default, "vision_auto": auto_pick,
                 "outdir": outdir if outdir and Path(outdir).is_dir() else ""}
 
+    # -- design families ----------------------------------------------------
+    def list_designs(self) -> dict:
+        """The design families (families.py) with their preview thumbnails."""
+        items = []
+        for key, fam in FAMILIES.items():
+            thumb = HERE / "ui" / "families" / f"{key}.jpg"
+            data = base64.b64encode(thumb.read_bytes()).decode() if thumb.exists() else ""
+            items.append({"id": key, "name": fam["name"], "about": fam["about"], "swatches": fam["accents"],
+                          "thumb": f"data:image/jpeg;base64,{data}" if data else ""})
+        last = LAST_DESIGN.read_text(encoding="utf-8").strip() if LAST_DESIGN.exists() else ""
+        return {"designs": items, "default": last if last in FAMILIES else ""}
+
+    def open_designs_folder(self) -> None:
+        """The reference pictures the families were designed from (PPT_Designs/)."""
+        folder = HERE / "PPT_Designs"
+        folder.mkdir(exist_ok=True)
+        os.startfile(folder)
+
     # -- online API providers ------------------------------------------------
     def provider_presets(self) -> dict:
         return {"presets": providers.PRESETS, "saved": providers.load()}
@@ -278,12 +298,14 @@ class Api:
                     files = [Path(f) for f in opts["files"]]
                     LAST_MODEL.write_text(opts["model"])
                     LAST_VISION.write_text(opts.get("vision", "auto"), encoding="utf-8")
+                    LAST_DESIGN.write_text(opts.get("design", ""), encoding="utf-8")
+                    design = opts.get("design") or None
                     outdir = Path(opts.get("outdir") or files[0].parent)
                     outdir.mkdir(parents=True, exist_ok=True)
                     work = outdir / f"{files[0].stem}_ppt"
                     deck = mp.auto(files, free_path(outdir / files[0].name), opts["model"], int(opts["slides"]),
                                    opts.get("focus", "").strip(), True, opts.get("animate", True),
-                                   opts.get("vision", "auto") or None, work)
+                                   opts.get("vision", "auto") or None, work, design)
                     spec = work / "spec.json"
                 else:
                     spec = Path(opts["spec"])

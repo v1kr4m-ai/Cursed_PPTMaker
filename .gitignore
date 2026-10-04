@@ -4,3 +4,6 @@ examples/preview/
 .last_outdir
 .last_vision
 .retired_models
+.last_design
+PPT_Designs/*
+!PPT_Designs/README.md

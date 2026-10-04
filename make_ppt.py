@@ -45,6 +45,8 @@ from pptx.enum.text import MSO_ANCHOR, PP_ALIGN
 from pptx.oxml.ns import qn
 from pptx.util import Emu, Inches, Pt
 
+from families import FAMILIES, FamilyLayouts, tint
+
 SOFFICE = os.environ.get("SOFFICE_PATH", r"C:\Program Files\LibreOffice\program\soffice.exe")
 TESSERACT = os.environ.get("TESSERACT_PATH", r"C:\Program Files\Tesseract-OCR\tesseract.exe")
 # Language data next to this script (eng, osd, hin). Falls back to Tesseract's own folder.
@@ -485,8 +487,10 @@ def normalize(spec: dict) -> None:
         if isinstance(img, dict):
             s.setdefault("caption", img.get("caption") or img.get("alt") or "")
             img = next((img[k] for k in ("path", "src", "file", "url", "image") if isinstance(img.get(k), str)), "")
-        if img is not None:
+        if img:
             s["image"] = img
+        else:
+            s.pop("image", None)  # null / "" / unusable: drop it (required only on image slides)
         for key in ("bullets", "items"):
             if isinstance(s.get(key), str):
                 s[key] = [s[key]]
@@ -541,6 +545,11 @@ def rgb(hexstr: str) -> RGBColor:
     return RGBColor.from_string(hexstr)
 
 
+def lum(c: RGBColor) -> float:
+    r, g, b = (v / 255 for v in c)
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b
+
+
 def mix(c: RGBColor, amount: float) -> RGBColor:
     """Blend colour towards white; amount=0.9 gives a pale tint."""
     return RGBColor(*(round(v + (255 - v) * amount) for v in c))
@@ -552,12 +561,24 @@ def text_height(paras: list[str], w: float, size: float, mono: bool, gap: float)
     return lines * size * 1.2 / 72 + len(paras) * gap / 72
 
 
-class Deck:
+class Deck(FamilyLayouts):
     def __init__(self, spec: dict, base: Path):
         self.spec, self.base, self.warnings = spec, base, []
         dark, accent, accent2 = PALETTES.get(spec.get("palette", "violet"), PALETTES["violet"])
         self.INK, self.ACCENT, self.ACCENT2 = rgb(dark), rgb(accent), rgb(accent2)
-        self.TINT = mix(self.ACCENT, 0.9)
+        self.ACCENT3, self.TINT = mix(self.ACCENT, 0.45), mix(self.ACCENT, 0.9)
+        self.BG, self.BODY, self.HEAD, self.MUTED, self.soft = None, BODY, self.INK, MUTED, False
+        self.ACCENTS = [self.ACCENT, self.ACCENT2, self.ACCENT3, mix(self.ACCENT2, 0.4)]
+        self.fam = FAMILIES.get(spec.get("family") or "", {})
+        self.HFONT = self.BFONT = self.NFONT = SANS
+        self.caps, self.radius = False, None
+        if f := self.fam:  # a design family: palette, fonts, card style and layout variants
+            self.ACCENTS = [rgb(a) for a in f["accents"]]
+            self.INK, (self.ACCENT, self.ACCENT2, self.ACCENT3) = rgb(f["dark"]), self.ACCENTS[:3]
+            self.TINT, self.BG, self.BODY, self.MUTED = rgb(f["card"]), rgb(f["bg"]), rgb(f["ink"]), rgb(f["muted"])
+            self.HEAD = self.BODY
+            self.soft, self.caps, self.radius = f["soft"], f["caps"], f["radius"]
+            self.HFONT, self.BFONT, self.NFONT = f["head"], f["body"], f["num"]
         self.prs = Presentation()
         self.prs.slide_width, self.prs.slide_height = Inches(W), Inches(H)
         self.slide_no = self.section_no = 0
@@ -565,7 +586,7 @@ class Deck:
 
     # primitives ---------------------------------------------------------
     def text(self, slide, x, y, w, h, paras, size=16, color=None, bold=False, mono=False,
-             align=PP_ALIGN.LEFT, anchor=MSO_ANCHOR.TOP, min_size=10, gap=4, bullets=False):
+             align=PP_ALIGN.LEFT, anchor=MSO_ANCHOR.TOP, min_size=10, gap=4, bullets=False, font=None):
         """paras: str or list; each item is str or list of (text, {bold, color}) runs."""
         paras = [paras] if isinstance(paras, (str, tuple)) else list(paras)
         plain = ["".join(r[0] for r in p) if isinstance(p, list) else str(p) for p in paras]
@@ -588,10 +609,10 @@ class Deck:
                 r = p.add_run()
                 r.text = chunk
                 f = r.font
-                f.name, f.size = MONO if mono else SANS, Pt(fit)
+                f.name, f.size = MONO if mono else (font or self.BFONT), Pt(fit)
                 set_cs_font(r)
                 f.bold = opts.get("bold", bold)
-                f.color.rgb = opts.get("color", color or BODY)
+                f.color.rgb = opts.get("color", color or self.BODY)
             if bullets:
                 pPr = p._p.get_or_add_pPr()
                 pPr.set("marL", str(Inches(0.3)))
@@ -602,18 +623,27 @@ class Deck:
                 pPr.append(pPr.makeelement(qn("a:buChar"), {"char": "\u25cf"}))
         return tb
 
-    def box(self, slide, x, y, w, h, fill, shape=MSO_SHAPE.ROUNDED_RECTANGLE, radius=0.08):
+    def box(self, slide, x, y, w, h, fill, shape=MSO_SHAPE.ROUNDED_RECTANGLE, radius=None, raised=True):
         s = slide.shapes.add_shape(shape, Inches(x), Inches(y), Inches(w), Inches(h))
         s.fill.solid()
         s.fill.fore_color.rgb = fill
         s.line.fill.background()
         s.shadow.inherit = False
         if shape == MSO_SHAPE.ROUNDED_RECTANGLE:
-            s.adjustments[0] = radius
+            fam_r = self.radius if self.radius is not None else 0.08
+            s.adjustments[0] = fam_r if radius is None else (0 if fam_r == 0 else radius)
+        if self.soft and raised and shape != MSO_SHAPE.RECTANGLE:  # soft shadow under light shapes
+            eff = s._element.spPr.find(qn("a:effectLst"))
+            shadow = eff.makeelement(qn("a:outerShdw"), {"blurRad": "203200", "dist": "50800",
+                                                         "dir": "5400000", "algn": "t", "rotWithShape": "0"})
+            clr = shadow.makeelement(qn("a:srgbClr"), {"val": "1A2333"})
+            clr.append(clr.makeelement(qn("a:alpha"), {"val": "20000"}))
+            shadow.append(clr)
+            eff.append(shadow)
         return s
 
     def badge(self, slide, x, y, label, fill=None, d=0.6, size=18):
-        c = self.box(slide, x, y, d, d, fill or self.ACCENT, MSO_SHAPE.OVAL)
+        c = self.box(slide, x, y, d, d, fill or self.ACCENT, MSO_SHAPE.OVAL, raised=False)
         tf = c.text_frame
         tf.margin_left = tf.margin_right = tf.margin_top = tf.margin_bottom = 0
         tf.vertical_anchor = MSO_ANCHOR.MIDDLE
@@ -621,7 +651,8 @@ class Deck:
         p.alignment = PP_ALIGN.CENTER
         r = p.add_run()
         r.text = str(label)[:2]
-        r.font.name, r.font.size, r.font.bold, r.font.color.rgb = SANS, Pt(size), True, WHITE
+        light = lum(fill or self.ACCENT) > 0.62
+        r.font.name, r.font.size, r.font.bold, r.font.color.rgb = self.NFONT, Pt(size), True, BODY if light else WHITE
 
     def code_block(self, slide, x, y, w, h, code, lang=""):
         self.box(slide, x, y, w, h, self.INK, radius=0.04)
@@ -636,7 +667,7 @@ class Deck:
     def warn(self, slide, x, y, w, h, msg):
         self.box(slide, x, y, w, h, AMBER_TINT)
         self.badge(slide, x + 0.25, y + (h - 0.5) / 2, "!", AMBER, d=0.5, size=20)
-        self.text(slide, x + 0.95, y + 0.1, w - 1.15, h - 0.2, [lead(msg)], size=15,
+        self.text(slide, x + 0.95, y + 0.1, w - 1.15, h - 0.2, [lead(msg)], size=15, color=BODY,
                   anchor=MSO_ANCHOR.MIDDLE, min_size=11)
 
     def picture(self, slide, path, x, y, w, h):
@@ -651,9 +682,9 @@ class Deck:
     def new_slide(self, s, dark=False):
         self.slide_no += 1
         slide = self.prs.slides.add_slide(self.prs.slide_layouts[6])
-        if dark:
+        if dark or self.BG:
             slide.background.fill.solid()
-            slide.background.fill.fore_color.rgb = self.INK
+            slide.background.fill.fore_color.rgb = self.INK if dark else self.BG
         if s.get("notes"):
             slide.notes_slide.notes_text_frame.text = s["notes"]
         self.anim.append([slide, [0], False])  # [slide, group start indexes, skip first group]
@@ -665,16 +696,46 @@ class Deck:
 
     def header(self, s, title=None):
         slide = self.new_slide(s)
+        style, tx, tw = self.fam.get("header"), LEFT, CW
+        if style == "dots_page":  # three dots + raised page-number circle
+            for i in range(3):
+                self.box(slide, LEFT + i * 0.24, 0.3, 0.13, 0.13, self.ACCENTS[i], MSO_SHAPE.OVAL, raised=False)
+            self.box(slide, RIGHT - 0.85, 0.35, 0.85, 0.85, self.TINT, MSO_SHAPE.OVAL)
+            self.text(slide, RIGHT - 0.85, 0.35, 0.85, 0.85, f"{self.slide_no:02d}", size=20, bold=True,
+                      font=self.NFONT, color=self.HEAD, align=PP_ALIGN.CENTER, anchor=MSO_ANCHOR.MIDDLE)
+            tw = CW - 1.2
+        elif style == "kicker_bar":  # accent bar beside the title
+            self.box(slide, LEFT, 0.48, 0.09, 0.95, self.ACCENT, MSO_SHAPE.RECTANGLE, raised=False)
+            tx, tw = LEFT + 0.32, CW - 0.32
         if s.get("kicker"):
-            self.text(slide, LEFT, 0.35, CW, 0.3, s["kicker"].upper(), size=12, color=self.ACCENT, bold=True)
-        self.text(slide, LEFT, 0.65, CW, 0.8, title or s["title"], size=34, color=self.INK,
-                  bold=True, min_size=24)
+            self.text(slide, tx, 0.35, tw, 0.3, s["kicker"].upper(), size=12, color=self.ACCENT, bold=True)
+        self.text(slide, tx, 0.65, tw, 0.8, self.cap(title or s["title"]), size=34, color=self.HEAD,
+                  bold=True, min_size=24, font=self.HFONT)
+        if style == "stripes":
+            for i in range(4):
+                self.box(slide, LEFT + i * 0.45, 1.45, 0.35, 0.07, self.ACCENTS[i], MSO_SHAPE.RECTANGLE, raised=False)
+        elif style == "hexdots":
+            for i in range(5):
+                self.box(slide, LEFT + i * 0.3, 1.43, 0.18, 0.16, self.ACCENTS[i % 4], MSO_SHAPE.HEXAGON, raised=False)
+        elif style == "rule":
+            self.box(slide, LEFT, 1.48, CW, 0.015, tint(self.MUTED, 0.55), MSO_SHAPE.RECTANGLE, raised=False)
+        elif style == "kicker":
+            self.box(slide, LEFT, 1.47, 0.7, 0.045, self.ACCENT, MSO_SHAPE.RECTANGLE, raised=False)
         self.mark(slide)
         self.anim[-1][2] = True  # title stays put; only content animates
         return slide
 
     # slide types --------------------------------------------------------
+    def variant(self, kind, prefix, s):
+        """Run the family's variant for this slide type, if it has one. True when handled."""
+        fn = getattr(self, prefix + str(self.fam.get(kind)), None)
+        if fn:
+            fn(s)
+        return fn is not None
+
     def s_title(self, s):
+        if self.variant("title", "t_", s):
+            return
         slide = self.new_slide(s, dark=True)
         self.text(slide, 0.8, 2.0, 11.7, 1.9, s["title"], size=54, color=WHITE, bold=True,
                   anchor=MSO_ANCHOR.BOTTOM, min_size=32)
@@ -687,6 +748,8 @@ class Deck:
             self.text(slide, 0.8, 6.5, 11.5, 0.4, s["footer"], size=14, color=SOFT)
 
     def s_section(self, s):
+        if self.variant("section", "sec_", s):
+            return
         slide = self.new_slide(s, dark=True)
         self.section_no += 1
         self.badge(slide, 0.8, 2.3, s.get("icon") or str(self.section_no), self.ACCENT, d=0.9, size=26)
@@ -714,6 +777,10 @@ class Deck:
                 self.warn(slide, LEFT, BOTTOM - 0.95, CW, 0.95, s["callout"])
 
     def s_cards(self, s):
+        if not self.variant("cards", "cd_", s):
+            self.cards_default(s)
+
+    def cards_default(self, s):
         cards = s["cards"][:6]
         cols = 2 if len(cards) == 4 else min(len(cards), 3)
         rows = math.ceil(len(cards) / cols)
@@ -728,16 +795,18 @@ class Deck:
             icon_col = self.ACCENT if i % 2 == 0 else self.ACCENT2
             if rows == 1:  # tall cards: icon on top
                 self.badge(slide, x + 0.3, y + 0.3, c.get("icon") or i + 1, icon_col, d=0.7, size=20)
-                self.text(slide, x + 0.3, y + 1.2, cw - 0.6, 0.8, c.get("title", ""), size=20,
-                          color=self.INK, bold=True, min_size=14)
+                self.text(slide, x + 0.3, y + 1.2, cw - 0.6, 0.8, self.cap(c.get("title", "")), size=20,
+                          color=self.HEAD, bold=True, min_size=14, font=self.HFONT)
                 self.text(slide, x + 0.3, y + 2.05, cw - 0.6, ch - 2.3, c.get("text", ""), size=16, min_size=11)
             else:  # short cards: icon at left
                 self.badge(slide, x + 0.3, y + 0.3, c.get("icon") or i + 1, icon_col, d=0.6)
-                self.text(slide, x + 1.15, y + 0.25, cw - 1.45, 0.5, c.get("title", ""), size=18,
-                          color=self.INK, bold=True, min_size=13)
+                self.text(slide, x + 1.15, y + 0.25, cw - 1.45, 0.5, self.cap(c.get("title", "")), size=18,
+                          color=self.HEAD, bold=True, min_size=13, font=self.HFONT)
                 self.text(slide, x + 1.15, y + 0.8, cw - 1.45, ch - 1.0, c.get("text", ""), size=14, min_size=10)
 
     def s_steps(self, s):
+        if self.variant("steps", "st_", s):
+            return
         steps = s["steps"]
         chunks = split_even(steps, 5)
         num = 0
@@ -751,24 +820,26 @@ class Deck:
                 y = TOP + i * (rh + gap)
                 self.box(slide, LEFT, y, CW, rh, self.TINT)
                 self.badge(slide, LEFT + 0.3, y + (rh - 0.6) / 2, num)
-                self.text(slide, LEFT + 1.2, y + 0.12, 3.6, rh - 0.24, st.get("title", ""), size=18,
-                          color=self.INK, bold=True, anchor=MSO_ANCHOR.MIDDLE, min_size=13)
+                self.text(slide, LEFT + 1.2, y + 0.12, 3.6, rh - 0.24, self.cap(st.get("title", "")), size=18,
+                          color=self.HEAD, bold=True, anchor=MSO_ANCHOR.MIDDLE, min_size=13, font=self.HFONT)
                 self.text(slide, LEFT + 5.0, y + 0.12, CW - 5.3, rh - 0.24, st.get("text", ""), size=15,
                           anchor=MSO_ANCHOR.MIDDLE, min_size=10)
 
     def s_stats(self, s):
+        if self.variant("stats", "sa_", s):
+            return
         stats = s["stats"][:4]
         slide = self.header(s)
         gap = 0.3
         cw = (CW - gap * (len(stats) - 1)) / len(stats)
-        ch = 2.6 if s.get("text") else BOTTOM - TOP
+        ch = 2.6 if s.get("text") else 3.0  # a fixed, compact card; full height leaves it mostly empty
         for i, st in enumerate(stats):
             self.mark(slide)
             x = LEFT + i * (cw + gap)
             self.box(slide, x, TOP, cw, ch, self.TINT)
             self.text(slide, x + 0.3, TOP + 0.3, cw - 0.6, 1.3, str(st.get("value", "")), size=60,
-                      color=self.ACCENT if i % 2 == 0 else self.ACCENT2, bold=True,
-                      anchor=MSO_ANCHOR.BOTTOM, min_size=28)
+                      color=self.ACCENTS[i % len(self.ACCENTS)], bold=True,
+                      anchor=MSO_ANCHOR.BOTTOM, min_size=28, font=self.NFONT)
             self.text(slide, x + 0.3, TOP + 1.7, cw - 0.6, ch - 1.9, st.get("label", ""), size=16, min_size=11)
         self.mark(slide)
         if s.get("text"):
@@ -805,7 +876,7 @@ class Deck:
                 for c in range(len(header)):
                     cell = tbl.cell(r, c)
                     cell.fill.solid()
-                    cell.fill.fore_color.rgb = self.INK if r == 0 else (self.TINT if r % 2 else WHITE)
+                    cell.fill.fore_color.rgb = self.INK if r == 0 else (self.TINT if r % 2 else (self.BG or WHITE))
                     cell.vertical_anchor = MSO_ANCHOR.MIDDLE
                     cell.margin_left = cell.margin_right = Inches(0.15)
                     run = cell.text_frame.paragraphs[0].add_run()
@@ -813,7 +884,7 @@ class Deck:
                     run.font.size, run.font.name = Pt(size), SANS
                     set_cs_font(run)
                     run.font.bold = r == 0
-                    run.font.color.rgb = WHITE if r == 0 else BODY
+                    run.font.color.rgb = WHITE if r == 0 else self.BODY
 
     def s_chart(self, s):
         slide = self.header(s)
@@ -828,7 +899,8 @@ class Deck:
         chart = slide.shapes.add_chart(kind, Inches(LEFT), Inches(TOP), Inches(cw),
                                        Inches(BOTTOM - TOP), data).chart
         chart.font.size, chart.font.name = Pt(12), SANS
-        palette = [self.ACCENT, self.ACCENT2, self.INK, AMBER, mix(self.ACCENT, 0.45), MUTED]
+        chart.font.color.rgb = self.BODY
+        palette = [self.ACCENT, self.ACCENT2, self.ACCENT3, self.INK, AMBER, self.MUTED]
         plot = chart.plots[0]
         plot.has_data_labels = True
         plot.data_labels.font.size = Pt(11)
@@ -852,7 +924,8 @@ class Deck:
                     ser.format.fill.solid()
                     ser.format.fill.fore_color.rgb = col
             chart.value_axis.has_major_gridlines = True
-            chart.value_axis.major_gridlines.format.line.color.rgb = RGBColor(0xE5, 0xE7, 0xEB)
+            chart.value_axis.major_gridlines.format.line.color.rgb = (
+                mix(self.BG, 0.12) if self.BG and lum(self.BG) < 0.45 else RGBColor(0xE5, 0xE7, 0xEB))
             chart.value_axis.format.line.fill.background()
             if kind == XL_CHART_TYPE.BAR_CLUSTERED:  # PowerPoint draws bar categories bottom-up
                 chart.category_axis.reverse_order = True
@@ -870,7 +943,7 @@ class Deck:
         self.box(slide, LEFT, TOP, w, BOTTOM - TOP - cap_h, self.TINT, radius=0.04)
         self.picture(slide, s["image"], LEFT + 0.2, TOP + 0.2, w - 0.4, BOTTOM - TOP - cap_h - 0.4)
         if s.get("caption"):
-            self.text(slide, LEFT, BOTTOM - 0.4, w, 0.4, s["caption"], size=12, color=MUTED,
+            self.text(slide, LEFT, BOTTOM - 0.4, w, 0.4, s["caption"], size=12, color=self.MUTED,
                       align=PP_ALIGN.CENTER)
         self.mark(slide)
         if side:
@@ -878,6 +951,8 @@ class Deck:
                       [lead(b) for b in s["bullets"]], size=18, gap=12, min_size=11, bullets=True)
 
     def s_closing(self, s):
+        if self.variant("closing", "cl_", s):
+            return
         slide = self.new_slide(s, dark=True)
         items = s.get("items", [])[:6]
         self.text(slide, 0.8, 0.7, 11.7, 0.9, s["title"], size=40, color=WHITE, bold=True, min_size=26)
@@ -899,7 +974,7 @@ class Deck:
                 add_animation(slide, [shapes[a:b] for a, b in bounds if b > a])
         self.prs.core_properties.title = self.spec.get("title", "")
         self.prs.core_properties.comments = self.spec.get(
-            "made_with", "Built by make_ppt.py (offline) from a hand-written spec; no AI model involved.")
+            "made_with", "Built by make_ppt.py (offline) from a hand-written spec; no AI model involved.")[:255]
         out.parent.mkdir(parents=True, exist_ok=True)
         try:
             self.prs.save(out)
@@ -1018,8 +1093,22 @@ def render_previews(deck: Path, outdir: Path) -> list[Path]:
     return pngs
 
 
-def build(spec_path: Path, out: Path | None, preview: bool = True, animate: bool = True) -> Path:
+def apply_design(spec: dict, design: str | None) -> None:
+    """Use a design family (see families.py / DESIGN_NOTES.md). None/"" keeps the default look."""
+    if not design:
+        return
+    if design not in FAMILIES:
+        sys.exit(f"Unknown design '{design}'. Choose one of: {', '.join(FAMILIES)}")
+    spec["family"] = design
+    spec.pop("theme", None)
+
+
+def build(spec_path: Path, out: Path | None, preview: bool = True, animate: bool = True,
+          design: str | None = None) -> Path:
     spec = json.loads(spec_path.read_text(encoding="utf-8"))
+    if design:
+        apply_design(spec, design)
+        spec_path.write_text(json.dumps(spec, indent=2, ensure_ascii=False), encoding="utf-8")
     base = spec_path.parent
     if errors := validate(spec, base):
         sys.exit("Spec errors:\n  " + "\n  ".join(errors))
@@ -1189,7 +1278,7 @@ def add_missing_images(spec: dict, files: list[Path], source: str) -> list[str]:
     is not re-added when the model already rebuilt it as a native chart slide.
     """
     slides = spec["slides"]
-    used = {Path(s.get("image", "")).name for s in slides}
+    used = {Path(s.get("image") or "").name for s in slides}
     has_chart = any(s.get("type") == "chart" for s in slides)
     descriptions = dict(re.findall(
         r"!\[image\]\(assets/([^)]+)\)\s*\n\nImage description \(vision model\): ([^\n]+)", source))
@@ -1215,7 +1304,7 @@ def add_missing_images(spec: dict, files: list[Path], source: str) -> list[str]:
 
 def auto(files: list[Path], out: Path | None, model: str, slides: int, extra: str,
          preview: bool, animate: bool = True, vision: str | None = "auto",
-         workdir: Path | None = None) -> Path:
+         workdir: Path | None = None, design: str | None = None) -> Path:
     if is_online(model):
         log.warning("%s is an online model - the extracted document text will be sent to it "
                     "(file reading, OCR and image descriptions still run locally)", model_label(model))
@@ -1257,18 +1346,49 @@ def auto(files: list[Path], out: Path | None, model: str, slides: int, extra: st
     print(f"Spec: {spec_path} (edit it and run `build` to tweak the deck)")
     online_parts = [w for w, on in (("document text", is_online(model)),
                                     ("pictures", any(is_online(m) for m in VISION_USED))) if on]
-    where = (f"ONLINE - {' and '.join(online_parts)} sent to an online model" if online_parts else "OFFLINE")
-    spec["made_with"] = (
-        f"Made {where}, by make_ppt.py on {__import__('datetime').date.today()}. "
-        f"Slide content: {model_label(model)}. "
-        f"Image descriptions: {', '.join(model_label(m) for m in sorted(VISION_USED)) or 'none'}. "
-        f"OCR: {('Tesseract ' + ', '.join(sorted(OCR_USED))) if OCR_USED else 'not needed'}. "
-        "File reading, layout and rendering: local Python + LibreOffice.")
+    where = (f"ONLINE ({' and '.join(online_parts)} sent out)" if online_parts else "OFFLINE")
+    # PowerPoint's Comments property holds at most 255 characters: keep this compact
+    spec["made_with"] = " | ".join(filter(None, [
+        f"Made {where} by make_ppt.py {__import__('datetime').date.today()}",
+        f"Slides: {model_label(model)}",
+        f"Images: {', '.join(model_label(m) for m in sorted(VISION_USED)) or 'none'}",
+        f"OCR: {', '.join(sorted(OCR_USED)) or 'none'}",
+        f"Design: {FAMILIES[design]['name']}" if design in FAMILIES else ""]))
+    apply_design(spec, design)
     spec_path.write_text(json.dumps(spec, indent=2, ensure_ascii=False), encoding="utf-8")
     return build(spec_path, out or first.parent / f"{first.stem}.pptx", preview, animate)
 
 
 # ---------------------------------------------------------------- CLI
+
+def render_family_thumbnails() -> None:
+    """Build examples/spec.json in each family and save its cover + a content slide as a
+    thumbnail for the app's Design row (ui/families/<key>.jpg)."""
+    here = Path(__file__).resolve().parent
+    out = here / "ui" / "families"
+    out.mkdir(parents=True, exist_ok=True)
+    for key in FAMILIES:
+        with tempfile.TemporaryDirectory() as tmp:
+            work = Path(tmp)
+            shutil.copytree(here / "examples" / "assets", work / "assets")
+            spec = json.loads((here / "examples" / "spec.json").read_text(encoding="utf-8"))
+            spec["family"] = key
+            (work / "spec.json").write_text(json.dumps(spec), encoding="utf-8")
+            deck = Deck(spec, work)
+            deck.build(work / "deck.pptx", animate=False)
+            pngs = render_previews(work / "deck.pptx", work / "preview")
+            cover = Image.open(pngs[0]).convert("RGB")
+            inner = Image.open(pngs[min(7, len(pngs) - 1)]).convert("RGB")  # the steps slide
+            w, h = 480, 270
+            thumb = cover.resize((w, h))
+            thumb.paste(inner.resize((w * 2 // 5, h * 2 // 5)), (w - w * 2 // 5 - 8, h - h * 2 // 5 - 8))  # corner inset
+            thumb.save(out / f"{key}.jpg", quality=86)
+        print(f"{key}: {out / (key + '.jpg')}")
+
+
+Deck.lead = staticmethod(lead)  # used by the family layouts (families.py)
+Deck.split_even = staticmethod(split_even)
+
 
 def main() -> None:
     sys.stdout.reconfigure(encoding="utf-8")
@@ -1285,6 +1405,7 @@ def main() -> None:
     b.add_argument("-o", "--out", type=Path)
     b.add_argument("--no-preview", action="store_true")
     b.add_argument("--no-animate", action="store_true", help="no fade transitions/animations")
+    b.add_argument("--design", choices=list(FAMILIES), help="design family (see DESIGN_NOTES.md)")
     a = sub.add_parser("auto", help="documents -> local LLM -> .pptx")
     a.add_argument("files", nargs="+", type=Path)
     a.add_argument("-o", "--out", type=Path)
@@ -1295,7 +1416,9 @@ def main() -> None:
     a.add_argument("-i", "--instructions", default="", help='e.g. "audience: management, focus on costs"')
     a.add_argument("--no-preview", action="store_true")
     a.add_argument("--no-animate", action="store_true", help="no fade transitions/animations")
+    a.add_argument("--design", choices=list(FAMILIES), help="design family (see DESIGN_NOTES.md)")
     sub.add_parser("schema", help="print the slide spec format")
+    sub.add_parser("families", help="render a preview of every design family (ui/families/*.jpg)")
     args = ap.parse_args()
 
     if args.cmd == "extract":
@@ -1303,13 +1426,16 @@ def main() -> None:
                          None if args.no_vision else args.vision)
         print(f"Extract: {md}")
     elif args.cmd == "build":
-        build(args.spec, args.out, not args.no_preview, not args.no_animate)
+        build(args.spec, args.out, not args.no_preview, not args.no_animate, args.design)
     elif args.cmd == "auto":
         auto(args.files, args.out, args.model, args.slides, args.instructions, not args.no_preview,
-             not args.no_animate, None if args.no_vision else args.vision)
+             not args.no_animate, None if args.no_vision else args.vision, design=args.design)
+    elif args.cmd == "families":
+        render_family_thumbnails()
     else:
         print(SCHEMA)
 
 
 if __name__ == "__main__":
     main()
+
