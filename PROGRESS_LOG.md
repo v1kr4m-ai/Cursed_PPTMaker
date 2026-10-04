@@ -72,3 +72,19 @@
 - Moved out of D:\Claude\Claude_Ollama (instruction pack) to
   D:\Claude\In_Progress\03_Windows_Desktop_Apps\Cursed_PPTMaker. requirements-ppt.txt -> requirements.txt.
 - Desktop shortcut "Make PPT" repointed. Claude_Ollama README restored to original.
+
+## 2026-10-04 — Desktop app (pywebview)
+- app.py + ui/index.html, started by "Cursed PPTMaker.bat" (pythonw, no console). Desktop shortcut
+  "Cursed PPTMaker.lnk". Style follows a frosted-glass/neo-tactile reference: light glass panel,
+  soft pills, blue glowing primary button/toggles/slider, cyan spinning ring on the active step.
+- Features: drag-drop (pywebviewFullPath via Python DOM drop handler) or browse; model menu with
+  sizes + fits/may-not-fit; slides slider; focus; animation/vision toggles; Save-to folder
+  (remembered in .last_outdir); live 4-step progress from make_ppt log lines; result card with
+  Open/Folder/Edit spec/Rebuild, offline stamp, slide thumbnails with lightbox.
+- make_ppt.auto gained workdir= so the working folder follows the chosen save folder.
+- Gotchas: pywebview introspects every public attribute of js_api - keep window/state private
+  (_window) or it recurses into WinForms objects. Two WebView2 windows sharing the data folder
+  can freeze blank -> single-instance mutex. PrintWindow can't capture WebView2; use screen capture.
+- Tested end to end by driving the real window with evaluate_js (Word+Excel -> deck, rebuild,
+  custom save folder). README screenshots of the app not added: captures included personal
+  notifications/paths.

@@ -1,3 +1,4 @@
 .last_model
 __pycache__/
 examples/preview/
+.last_outdir

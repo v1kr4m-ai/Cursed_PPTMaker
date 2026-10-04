@@ -54,7 +54,9 @@ No cloud API, no account, no internet needed once it is set up.
   rebuild in seconds without the model.
 - **Provenance stamp:** each deck records which models made it, in
   *File → Info → Properties → Comments*.
-- **Windows launcher:** double-click, pick files, pick a model from a menu, done.
+- **Desktop app:** a frosted-glass window with drag-and-drop, a model picker that knows
+  what fits in memory, live progress, slide thumbnails and a choice of save folder.
+- **Console launcher** too, for a no-frills double-click workflow.
 
 ## How it works
 
@@ -98,7 +100,7 @@ ollama pull qwen3:8b
 python make_ppt.py auto "report.pdf"
 ```
 
-On Windows, just double-click **`Make PPT.bat`** instead of step 3.
+On Windows, double-click **`Cursed PPTMaker.bat`** for the desktop app instead of step 3.
 
 ## Installation
 
@@ -123,7 +125,25 @@ Everything is downloaded once. After that, the whole pipeline runs without inter
 
 ## Usage
 
-### Windows launcher
+### Desktop app
+
+Double-click **`Cursed PPTMaker.bat`** (it starts `app.py` without a console window).
+
+| Area | What you can do |
+|---|---|
+| **Sources** | drop files onto the window, or click to browse; remove any with ✕ |
+| **Model** | pick from your installed offline models, with sizes; a blue dot means it fits in free memory right now, grey means it may not |
+| **Slides / Focus** | slide count (4–20) and optional guidance such as `audience: management` |
+| **Animations / Describe images** | turn fade animations and vision descriptions on or off |
+| **Save to** | choose a folder for the deck and its working files, or ✕ to save next to the first source file (remembered between sessions) |
+| **Progress** | four steps light up as it reads, looks at pictures, writes and builds; *Details* shows the full log |
+| **Result** | open the deck or its folder, edit `spec.json` in Notepad and **Rebuild** in seconds, click thumbnails to enlarge, and see the offline stamp |
+
+Only one window runs at a time (a second launch just tells you it is already open).
+The app uses Windows' built-in Edge WebView2 to draw its interface — no browser or
+internet needed.
+
+### Console launcher
 
 Double-click `Make PPT.bat` (or make a desktop shortcut to it):
 
@@ -331,7 +351,10 @@ The context window is sized to your document, so short documents use less memory
 ```
 Cursed_PPTMaker/
 ├── make_ppt.py            # extract, build, auto, schema — the whole pipeline
-├── make_ppt_launcher.ps1  # Windows front end: file picker, model menu, Ollama start-up
+├── app.py                # desktop app: window + bridge to make_ppt (pywebview)
+├── ui/index.html         # the app's interface (HTML/CSS/JS, fully offline)
+├── Cursed PPTMaker.bat   # starts the desktop app
+├── make_ppt_launcher.ps1  # console front end: file picker, model menu, Ollama start-up
 ├── Make PPT.bat           # double-click / drag-and-drop entry point
 ├── requirements.txt       # Python packages
 ├── tessdata/              # Tesseract language data: eng, hin, osd

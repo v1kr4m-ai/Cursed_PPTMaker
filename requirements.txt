@@ -10,4 +10,5 @@ pypdf==6.13.3
 pdfplumber==0.11.10
 pypdfium2==5.13.0
 pytesseract==0.3.13
+pywebview==6.2.1         # desktop window (app.py); uses Windows' built-in Edge WebView2
 # Not pip: Ollama, LibreOffice (tested 26.8), Tesseract OCR (tested 5.4; language data in tessdata/)

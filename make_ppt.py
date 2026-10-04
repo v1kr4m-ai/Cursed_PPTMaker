@@ -1056,11 +1056,12 @@ def add_missing_images(spec: dict, files: list[Path], source: str) -> list[str]:
 
 
 def auto(files: list[Path], out: Path | None, model: str, slides: int, extra: str,
-         preview: bool, animate: bool = True, vision: str | None = "auto") -> Path:
+         preview: bool, animate: bool = True, vision: str | None = "auto",
+         workdir: Path | None = None) -> Path:
     if model.endswith(":cloud") or "-cloud" in model:
         log.warning("%s is an Ollama cloud model - this run will NOT be offline", model)
     first = files[0]
-    work = first.parent / f"{first.stem}_ppt"
+    work = workdir or first.parent / f"{first.stem}_ppt"  # extract, assets, spec, previews
     md = extract_all(files, work, vision)
     content = md.read_text(encoding="utf-8")
     if len(content) > 60_000:
