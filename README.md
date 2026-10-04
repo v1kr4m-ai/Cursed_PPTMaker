@@ -132,9 +132,10 @@ Double-click **`Cursed PPTMaker.bat`** (it starts `app.py` without a console win
 | Area | What you can do |
 |---|---|
 | **Sources** | drop files onto the window, or click to browse; remove any with ✕ |
-| **Model** | pick from your installed offline models, with sizes; a blue dot means it fits in free memory right now, grey means it may not |
+| **Model** | grouped as *On this PC* (offline, with sizes; blue dot = fits in free memory now, grey = may not), *Ollama cloud* and *API providers* (online, amber dot); **+ Add online model…** adds an API provider |
 | **Slides / Focus** | slide count (4–20) and optional guidance such as `audience: management` |
-| **Animations / Describe images** | turn fade animations and vision descriptions on or off |
+| **Image model** | which model describes your pictures: *Auto* (best local vision model), *Off*, a specific local vision model, an Ollama cloud vision model, or an API model that accepts images; online choices are marked amber |
+| **Animations** | fade transitions and entrance animations on or off |
 | **Save to** | choose a folder for the deck and its working files, or ✕ to save next to the first source file (remembered between sessions) |
 | **Progress** | four steps light up as it reads, looks at pictures, writes and builds; *Details* shows the full log |
 | **Result** | open the deck or its folder, edit `spec.json` in Notepad and **Rebuild** in seconds, click thumbnails to enlarge, and see the offline stamp |
@@ -284,9 +285,36 @@ prints the full format):
   Automatic selection currently covers Devanagari → Hindi; other scripts need a small
   change in `ocr_lang()`.
 
+## Online models (optional)
+
+Offline is the default, but you can also use online models when you want a bigger brain:
+
+- **Ollama cloud models** you have pulled (e.g. `glm-5:cloud`, `kimi-k2.6:cloud`) appear in the
+  menu automatically. They need `ollama signin`.
+- **Any OpenAI-compatible API** — OpenAI, Google Gemini, OpenRouter, Groq, Anthropic, or a custom
+  URL. In the app: model menu → **+ Add online model…** → pick a provider, paste your API key,
+  **Load list**, choose a model, **Save & use**.
+
+What happens with an online model:
+
+- With an online **slide** model, only the **extracted text** (plus the image descriptions) is
+  sent. With an online **image** model, your **pictures** are sent. Reading files, OCR, layout
+  and rendering always run on your PC.
+- If an online image model fails or can't actually see images, the app falls back to a local
+  vision model (never to another online one).
+- The status badge turns amber and the model hint says where your text is going.
+- The deck's stamp says *Made ONLINE …* and names the model and provider.
+- API keys are encrypted with Windows DPAPI (only your Windows account on this PC can read
+  them) and stored in `%APPDATA%\CursedPPTMaker\providers.json` — outside the project, so
+  they are never committed.
+
+Command line: `python make_ppt.py auto report.pdf -m api:<provider-id>:<model> --vision <model>` (add the
+provider in the app first), or `-m glm-5:cloud` for Ollama cloud. The console launcher
+(`Make PPT.bat`) stays offline-only.
+
 ## Is it really offline?
 
-Yes, once installed:
+Yes, with an offline model (the default), once installed:
 
 - File reading, OCR, slide rendering, animations and previews run locally.
 - The only network connection the script makes is to **your own Ollama** at
@@ -352,6 +380,7 @@ The context window is sized to your document, so short documents use less memory
 Cursed_PPTMaker/
 ├── make_ppt.py            # extract, build, auto, schema — the whole pipeline
 ├── app.py                # desktop app: window + bridge to make_ppt (pywebview)
+├── providers.py          # online API providers: OpenAI-compatible calls, DPAPI-encrypted keys
 ├── ui/index.html         # the app's interface (HTML/CSS/JS, fully offline)
 ├── Cursed PPTMaker.bat   # starts the desktop app
 ├── make_ppt_launcher.ps1  # console front end: file picker, model menu, Ollama start-up

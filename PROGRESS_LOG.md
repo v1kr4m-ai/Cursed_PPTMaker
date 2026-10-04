@@ -88,3 +88,59 @@
 - Tested end to end by driving the real window with evaluate_js (Word+Excel -> deck, rebuild,
   custom save folder). README screenshots of the app not added: captures included personal
   notifications/paths.
+
+## 2026-10-04 — Fix: crash on malformed model output
+- Bug: "TypeError: unsupported operand type(s) for /: 'WindowsPath' and 'dict'" when a local
+  model wrote "image" as an object ({"path": ..., "caption": ...}); validate() did base / dict.
+- normalize() now runs inside validate(): image object/list -> path string (+caption), single
+  bullet string -> list, bullet/item/header/category/cell objects -> text, cards/steps/stats as
+  strings -> objects, numeric strings in chart values ("1,200", "15%") -> numbers. Anything still
+  wrong becomes a normal validation error sent back to the model instead of a crash.
+- Tested with a deliberately messy spec (8 slide types) and the example spec.
+
+## 2026-10-04 — Fix: TimeoutError after a 30-minute hang
+- Ollama log showed attempt 1 done in 46 s, attempt 2 running 30m0s until our timeout: the small
+  model looped in JSON mode (no reply cap). socket TimeoutError isn't a URLError, so it escaped as
+  "TimeoutError: timed out".
+- ask_ollama: num_predict = 6144 (MAX_REPLY_TOKENS) + repeat_penalty 1.1; num_ctx sized for it;
+  TimeoutError -> friendly message. Vision replies capped at 400 tokens.
+- app: model-list call guarded against timeouts while Ollama loads; elapsed-time counter while
+  a job runs so long waits don't look frozen.
+- Tested: timeout path message; normal llama3.2 run Word+Excel -> 7 slides in ~2 min.
+
+## 2026-10-04 — Online models (optional)
+- providers.py: any OpenAI-compatible API (presets: OpenAI, Gemini, OpenRouter, Groq, Anthropic,
+  custom). Keys DPAPI-encrypted in %APPDATA%\CursedPPTMaker\providers.json (outside the repo).
+  JSON mode with fallback when unsupported; fenced replies unwrapped; readable errors for bad key,
+  rate limit, offline. Model id format: api:<provider-id>:<model>.
+- make_ppt: ask_llm routes api:* to providers, else Ollama; is_online/model_label; online runs
+  warn and the deck stamp says "Made ONLINE ...". Ollama cloud 401 -> "run ollama signin" hint.
+- normalize(): missing slide titles get a placeholder (small models drop them via the API route).
+- App: model menu grouped (On this PC / Ollama cloud / API providers), amber online markers and
+  badge, privacy hint; "+ Add online model..." dialog (preset, key, Load list, Save & use, Remove).
+  Console launcher stays offline-only.
+- Tested without sending data out: a custom provider pointed at local Ollama's /v1 endpoint ->
+  Word+Excel deck in 32 s, stamp "Made ONLINE". Real cloud/API providers not exercised (would send
+  data externally / need the user's keys).
+
+## 2026-10-04 — Choosable image (vision) model, incl. online
+- UI: "Image model" picker replaces the Describe-images switch: Auto (best local), Off, local
+  vision models, Ollama cloud vision models, API models (marked "must accept images").
+  Vision support detected via Ollama /api/show "capabilities" (name heuristic fallback).
+  Online picks: amber marker, "your pictures will be sent to X", badge combines both models.
+  Remembered in .last_vision (gitignored).
+- make_ppt: describe_image routes api:* to providers.describe_image (OpenAI image_url data URL);
+  fallbacks only ever go to local vision models; text-only replies like "I'm unable to view
+  images" are detected (NO_SIGHT) and treated as failure -> fallback. Stamp names the image model
+  and says ONLINE if pictures were sent out.
+- UI: panel split into fixed frame + scrolling .panel-body (cyan rim no longer scrolls over
+  controls); dropdowns open upward / shrink to fit the panel.
+- Tested offline: moondream explicit (UI run, stamp + log correct), API route via local Ollama /v1
+  with llava, fallback from a text-only API model to llama3.2-vision; menus measured in a hidden
+  window (both fully inside the panel). Restored the user's remembered phi4 / Auto afterwards.
+
+## 2026-10-04 — Retired Ollama cloud models
+- User hit "glm-5 was retired at 2026-07-15": the local :cloud tag stays in `ollama list` after
+  the cloud side retires it. ask_ollama now recognises "retired"/HTTP 410, explains it, suggests
+  `ollama rm <model>`, and records the model in .retired_models (gitignored); the app hides those
+  from both menus. Verified with glm-5:cloud.

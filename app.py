@@ -28,9 +28,11 @@ from PIL import Image
 from webview.dom import DOMEventHandler
 
 import make_ppt as mp
+import providers
 
 HERE = Path(__file__).resolve().parent
 LAST_MODEL = HERE / ".last_model"   # shared with the console launcher
+LAST_VISION = HERE / ".last_vision"  # image model: "auto", "" (off) or a model id
 LAST_OUTDIR = HERE / ".last_outdir"  # chosen "Save to" folder; empty/missing = next to the source
 NO_WINDOW = 0x08000000               # CREATE_NO_WINDOW: no console flashes under pythonw
 SUPPORTED = (mp.IMAGE_EXT | set(mp.LEGACY) |
@@ -161,20 +163,73 @@ class Api:
 
     # -- called from JavaScript ------------------------------------------
     def list_models(self) -> dict:
+        """Local Ollama models, Ollama cloud models and API-provider models, one list.
+        Each: {name, label, kind: local|cloud|api, size, fits, provider}."""
+        models, error, free = [], None, 0.0
         if err := ensure_ollama():
-            return {"error": err, "models": []}
-        tags = ollama_get("/api/tags").get("models", [])
-        free = free_memory_gb()
-        models = sorted(({"name": m["name"], "size": round(m["size"] / 2**30, 1),
-                          "fits": m["size"] / 2**30 * 1.1 <= free}
-                         for m in tags if "cloud" not in m["name"] and "embed" not in m["name"]),
-                        key=lambda m: m["size"])
+            error = err
+        else:
+            try:
+                tags = ollama_get("/api/tags").get("models", [])
+                free = free_memory_gb()
+                retired = mp.retired_models()
+                for m in tags:
+                    name, gb = m["name"], m["size"] / 2**30
+                    if "embed" in name or name in retired:
+                        continue  # embedding models can't write slides; retired cloud models are gone
+                    if mp.is_online(name):
+                        models.append({"name": name, "label": name, "kind": "cloud", "size": 0,
+                                       "fits": True, "provider": "Ollama cloud"})
+                    else:
+                        models.append({"name": name, "label": name, "kind": "local", "size": round(gb, 1),
+                                       "fits": gb * 1.1 <= free, "provider": "this PC"})
+            except OSError as e:  # includes TimeoutError while Ollama is busy loading a model
+                error = f"Ollama did not answer ({e}). Try again in a moment."
+        for prov in providers.load():
+            for name in prov.get("models", []):
+                models.append({"name": f"api:{prov['id']}:{name}", "label": name, "kind": "api",
+                               "size": 0, "fits": True, "provider": prov["name"]})
+        order = {"local": 0, "cloud": 1, "api": 2}
+        models.sort(key=lambda m: (order[m["kind"]], m["size"], m["label"]))
+        # image models: Ollama models that report vision support; API models can't be checked
+        vision = [dict(m) for m in models if m["kind"] == "api" or mp.vision_capable(m["name"])]
+        last_v = LAST_VISION.read_text(encoding="utf-8").strip() if LAST_VISION.exists() else "auto"
+        vision_default = last_v if last_v in ("", "auto") or any(v["name"] == last_v for v in vision) else "auto"
+        auto_pick = next((n for n in mp.vision_candidates(None)), "")
         names = [m["name"] for m in models]
         last = LAST_MODEL.read_text().strip() if LAST_MODEL.exists() else ""
-        default = next((n for n in (last, mp.DEFAULT_MODEL) if n in names), names[0] if names else "")
+        local = [m["name"] for m in models if m["kind"] == "local"]
+        default = next((n for n in (last, mp.DEFAULT_MODEL) if n in names),
+                       (local or names or [""])[0])
         outdir = LAST_OUTDIR.read_text(encoding="utf-8").strip() if LAST_OUTDIR.exists() else ""
-        return {"models": models, "free": round(free), "default": default,
+        return {"models": models, "free": round(free), "default": default, "error": error,
+                "vision": vision, "vision_default": vision_default, "vision_auto": auto_pick,
                 "outdir": outdir if outdir and Path(outdir).is_dir() else ""}
+
+    # -- online API providers ------------------------------------------------
+    def provider_presets(self) -> dict:
+        return {"presets": providers.PRESETS, "saved": providers.load()}
+
+    def provider_models(self, base_url: str, key: str, pid: str = "") -> dict:
+        """List a provider's models. Empty key = use the stored key of provider `pid`."""
+        try:
+            if not key and pid:
+                key = providers._get(pid)[1]
+            return {"models": providers.list_models(base_url, key)}
+        except (ValueError, OSError) as e:
+            return {"error": str(e)}
+
+    def save_provider(self, name: str, base_url: str, key: str, model: str) -> dict:
+        try:
+            pid = providers.slug(name)
+            existing = next((p["models"] for p in providers.load() if p["id"] == pid), [])
+            providers.save(name, base_url, key, list(dict.fromkeys(existing + [model])))
+            return {"ok": True, "model": f"api:{pid}:{model}"}
+        except (ValueError, OSError) as e:
+            return {"error": str(e)}
+
+    def delete_provider(self, pid: str) -> None:
+        providers.delete(pid)
 
     def pick_files(self) -> list[str]:
         picked = self._window.create_file_dialog(webview.FileDialog.OPEN, allow_multiple=True,
@@ -222,12 +277,13 @@ class Api:
                 if kind == "auto":
                     files = [Path(f) for f in opts["files"]]
                     LAST_MODEL.write_text(opts["model"])
+                    LAST_VISION.write_text(opts.get("vision", "auto"), encoding="utf-8")
                     outdir = Path(opts.get("outdir") or files[0].parent)
                     outdir.mkdir(parents=True, exist_ok=True)
                     work = outdir / f"{files[0].stem}_ppt"
                     deck = mp.auto(files, free_path(outdir / files[0].name), opts["model"], int(opts["slides"]),
                                    opts.get("focus", "").strip(), True, opts.get("animate", True),
-                                   "auto" if opts.get("vision", True) else None, work)
+                                   opts.get("vision", "auto") or None, work)
                     spec = work / "spec.json"
                 else:
                     spec = Path(opts["spec"])

@@ -51,9 +51,8 @@
   /* ---------- left: frosted control panel ---------- */
   .panel {
     position: relative;
-    display: flex; flex-direction: column; gap: 15px;
-    padding: 24px 24px 22px;
-    overflow-y: auto; overflow-x: hidden;
+    display: flex; flex-direction: column; min-height: 0;
+    overflow: hidden;
     border-radius: var(--radius-xl);
     background: linear-gradient(165deg, rgba(236, 240, 246, 0.66), rgba(208, 215, 227, 0.50) 55%, rgba(176, 186, 203, 0.46));
     border: 1px solid var(--glass-edge);
@@ -67,6 +66,7 @@
     filter: drop-shadow(0 0 10px rgba(52, 227, 246, 0.55));
     -webkit-mask: linear-gradient(135deg, transparent 40%, #000 85%);
   }
+  .panel-body { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 15px; padding: 24px 24px 22px; overflow-y: auto; overflow-x: hidden; }
   .brand { display: flex; align-items: center; gap: 12px; }
   .logo {
     width: 38px; height: 38px; border-radius: 12px; display: grid; place-items: center;
@@ -114,11 +114,12 @@
     max-height: 290px; overflow: auto; padding: 6px; display: none;
   }
   .select.open .menu { display: block; }
+  .select.up .menu { top: auto; bottom: calc(100% + 8px); }
   .opt { width: 100%; display: flex; align-items: center; gap: 10px; padding: 9px 10px; border-radius: 12px; font-size: 13.5px; text-align: left; color: var(--ink); }
   .opt:hover, .opt[aria-selected="true"] { background: var(--pill-2); }
   .dot { width: 9px; height: 9px; border-radius: 50%; flex: none; background: var(--blue); box-shadow: 0 0 8px rgba(58, 107, 245, .7); }
   .dot.no { background: #b6bdc8; box-shadow: none; }
-  .opt .size { margin-left: auto; color: var(--ink-soft); font-variant-numeric: tabular-nums; }
+  .opt .size { margin-left: auto; color: var(--ink-soft); font-variant-numeric: tabular-nums; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 60%; }
   .hint { font-size: 12px; color: #2f3540; margin: 7px 0 0 6px; }
   .hint.warn { color: #9a5b00; }
 
@@ -255,6 +256,42 @@
   .mini { flex: none; padding: 8px 14px; border-radius: 12px; font-size: 13px; font-weight: 600; color: #fff;
           background: linear-gradient(180deg, var(--blue-hi), var(--blue)); box-shadow: 0 6px 14px rgba(58, 107, 245, .4), inset 0 1px 0 rgba(255, 255, 255, .4); }
   .mini:hover { filter: brightness(1.07); }
+  /* model menu groups + online markers */
+  .grp { font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-soft); padding: 10px 10px 4px; }
+  .dot.net { background: var(--warn); box-shadow: 0 0 8px rgba(242, 177, 74, .8); }
+  .tag { margin-left: auto; flex: none; font-size: 11.5px; padding: 2px 8px; border-radius: 8px; font-weight: 600; background: rgba(242, 177, 74, .2); color: #7a4f00; }
+  .opt.add { color: var(--blue); font-weight: 600; margin-top: 4px; border-top: 1px solid var(--pill-2); border-radius: 0 0 12px 12px; }
+  .badge.online .dot { background: var(--warn); box-shadow: 0 0 10px var(--warn); }
+
+  /* add-provider dialog */
+  .modal { position: fixed; inset: 0; z-index: 30; display: none; place-items: center; background: rgba(5, 7, 10, .7); backdrop-filter: blur(6px); }
+  .modal.show { display: grid; }
+  .sheet {
+    width: min(560px, 92vw); max-height: 90vh; overflow: auto; padding: 26px; border-radius: 26px;
+    background: linear-gradient(160deg, rgba(40, 46, 58, .96), rgba(22, 26, 33, .97));
+    border: 1px solid var(--dark-edge); box-shadow: 0 40px 90px rgba(0, 0, 0, .6); user-select: text;
+  }
+  .sheet h3 { margin: 0; font: 700 22px var(--font-display); }
+  .sheet .m-sub { margin: 6px 0 18px; font-size: 13px; color: var(--on-dark-soft); line-height: 1.5; }
+  .sheet label { display: block; font-size: 12.5px; font-weight: 600; color: var(--on-dark-soft); margin: 12px 0 6px 4px; }
+  .sheet input, .sheet select {
+    width: 100%; padding: 11px 14px; border-radius: 14px; border: 1px solid var(--dark-edge); outline: 0;
+    background: rgba(255, 255, 255, .06); color: var(--on-dark); font-size: 14px;
+  }
+  .sheet select option { color: #111; }
+  .sheet input:focus, .sheet select:focus { border-color: var(--blue-hi); box-shadow: 0 0 0 3px rgba(58, 107, 245, .3); }
+  .m-row { display: flex; gap: 8px; }
+  .m-row input { flex: 1; }
+  .m-msg { min-height: 18px; margin: 10px 4px 0; font-size: 12.5px; color: var(--on-dark-soft); }
+  .m-msg.err { color: #ffb4b4; } .m-msg.ok { color: var(--ok); }
+  .saved { margin-top: 16px; display: flex; flex-direction: column; gap: 6px; }
+  .saved:empty { display: none; }
+  .saved .row { display: flex; align-items: center; gap: 10px; padding: 9px 12px; border-radius: 14px; background: var(--dark-pill); border: 1px solid var(--dark-edge); font-size: 13px; }
+  .saved .row span { flex: 1; color: var(--on-dark-soft); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .saved .row b { color: var(--on-dark); font-weight: 600; }
+  .saved .row button { color: var(--on-dark-soft); padding: 4px 8px; border-radius: 8px; }
+  .saved .row button:hover { background: rgba(255, 107, 107, .15); color: #ffb4b4; }
+  .m-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 22px; }
   ::-webkit-scrollbar { width: 8px; height: 8px; }
   ::-webkit-scrollbar-thumb { background: rgba(120, 130, 145, .45); border-radius: 8px; }
   @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
@@ -265,11 +302,12 @@
 
   <!-- ===== controls ===== -->
   <section class="panel" aria-label="Deck settings">
+  <div class="panel-body" id="panel-body">
     <div class="brand">
       <div class="logo" aria-hidden="true">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="13" rx="2.5"/><path d="M8 21h8M12 17v4M7 13l3-3 2 2 4-4"/></svg>
       </div>
-      <div><h1>Cursed PPTMaker</h1><small>Documents in, slides out. Offline.</small></div>
+      <div><h1>Cursed PPTMaker</h1><small>Documents in, slides out. Offline first.</small></div>
     </div>
 
     <div>
@@ -295,6 +333,19 @@
       <p class="hint" id="mem-hint"></p>
     </div>
 
+    <div>
+      <p class="label" id="vmodel-label">Image model</p>
+      <div class="select" id="vselect">
+        <button class="soft select-btn" id="vselect-btn" aria-haspopup="listbox" aria-labelledby="vmodel-label">
+          <span class="dot" id="vsel-dot"></span><span class="val" id="vsel-val">Loading…</span>
+          <span class="meta" id="vsel-meta"></span>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#3d4450" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+        </button>
+        <div class="soft menu" id="vmenu" role="listbox"></div>
+      </div>
+      <p class="hint" id="v-hint"></p>
+    </div>
+
     <div class="row">
       <div class="slider-wrap">
         <div class="slider-top"><span class="label" style="margin:0">Slides</span><output id="n-out">10</output></div>
@@ -302,7 +353,6 @@
       </div>
       <div class="toggles">
         <label class="toggle">Animations <button class="switch" role="switch" aria-checked="true" id="t-anim"></button></label>
-        <label class="toggle">Describe images <button class="switch" role="switch" aria-checked="true" id="t-vis"></button></label>
       </div>
     </div>
 
@@ -325,6 +375,7 @@
       <svg width="19" height="19" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2l2.4 6.6L21 11l-6.6 2.4L12 20l-2.4-6.6L3 11l6.6-2.4z"/></svg>
       <span id="go-txt">Add files to start</span>
     </button>
+  </div>
   </section>
 
   <!-- ===== progress + result ===== -->
@@ -333,7 +384,7 @@
       <h2 id="headline">Ready when you are</h2>
       <span class="badge" id="status"><span class="dot"></span><span id="status-txt">Checking Ollama…</span></span>
     </div>
-    <p class="sub" id="subline">Everything runs on this PC. Nothing is uploaded.</p>
+    <p class="sub" id="subline">With an offline model everything runs on this PC.</p>
 
     <ol class="steps" id="steps">
       <li class="step idle" data-stage="read"><span class="orb"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6M8 13h8M8 17h5"/></svg></span><div class="txt"><b>Read the files</b><span>Text, tables, images, OCR for scans</span></div></li>
@@ -363,6 +414,35 @@
       <div class="log" id="log"></div>
     </details>
   </section>
+</div>
+
+<div class="modal" id="modal" role="dialog" aria-modal="true" aria-labelledby="m-title">
+  <div class="sheet">
+    <h3 id="m-title">Add an online model</h3>
+    <p class="m-sub">Works with any OpenAI-compatible API. When you use it, your documents' extracted text is sent
+      to that provider — reading files, OCR and image descriptions still happen on this PC.
+      Your key is encrypted for your Windows account and stored outside the project.</p>
+    <label for="m-preset">Provider</label>
+    <select id="m-preset"></select>
+    <label for="m-name">Name</label>
+    <input id="m-name" autocomplete="off">
+    <label for="m-url">Base URL</label>
+    <input id="m-url" autocomplete="off" spellcheck="false">
+    <label for="m-key">API key</label>
+    <input id="m-key" type="password" autocomplete="off" spellcheck="false">
+    <label for="m-model">Model</label>
+    <div class="m-row">
+      <input id="m-model" list="m-models" autocomplete="off" spellcheck="false" placeholder="e.g. gpt-4.1-mini">
+      <datalist id="m-models"></datalist>
+      <button class="btn ghost" id="m-load">Load list</button>
+    </div>
+    <p class="m-msg" id="m-msg"></p>
+    <div class="saved" id="m-saved"></div>
+    <div class="m-actions">
+      <button class="btn ghost" id="m-cancel">Cancel</button>
+      <button class="btn primary" id="m-save">Save &amp; use</button>
+    </div>
+  </div>
 </div>
 
 <div class="lightbox" id="lightbox"><img alt="Slide preview" id="lightbox-img"></div>
@@ -401,37 +481,205 @@ for (const ev of ["dragleave", "drop"]) document.addEventListener(ev, e => { if 
 /* ---------- models ---------- */
 async function loadModels() {
   const r = await pywebview.api.list_models();
-  if (r.error) { setStatus(false, "Ollama unavailable"); $("sel-val").textContent = "No models"; showError(r.error); return; }
-  setStatus(true, "Offline · Ollama ready");
   state.models = r.models;
-  $("menu").replaceChildren(...r.models.map(m => {
-    const b = document.createElement("button");
-    b.className = "opt"; b.setAttribute("role", "option");
-    b.innerHTML = `<span class="dot ${m.fits ? "" : "no"}"></span><span class="n"></span><span class="size">${m.size.toFixed(1)} GB</span>`;
-    b.querySelector(".n").textContent = m.name;
-    b.title = m.fits ? "Should fit in free memory" : "May not fit in free memory right now";
-    b.onclick = () => { chooseModel(m.name); $("select").classList.remove("open"); };
-    return b;
-  }));
+  state.ollamaBad = r.error ? (r.models.length ? "Ollama unavailable · API models only" : "Ollama unavailable") : "";
+  if (r.error && !r.models.length) { $("sel-val").textContent = "No models"; showError(r.error); }
+  const groups = [["local", "On this PC · offline"], ["cloud", "Ollama cloud · online"], ["api", "API providers · online"]];
+  const rows = [];
+  for (const [kind, title] of groups) {
+    const list = r.models.filter(m => m.kind === kind);
+    if (!list.length) continue;
+    const h = document.createElement("div"); h.className = "grp"; h.textContent = title; rows.push(h);
+    for (const m of list) {
+      const b = document.createElement("button");
+      b.className = "opt"; b.setAttribute("role", "option"); b.dataset.name = m.name;
+      const local = kind === "local";
+      b.innerHTML = `<span class="dot ${local ? (m.fits ? "" : "no") : "net"}"></span><span class="n"></span>` +
+                    (local ? `<span class="size">${m.size.toFixed(1)} GB</span>` : `<span class="tag"></span>`);
+      b.querySelector(".n").textContent = m.label;
+      if (!local) b.querySelector(".tag").textContent = kind === "cloud" ? "cloud" : m.provider;
+      b.title = local ? (m.fits ? "Should fit in free memory" : "May not fit in free memory right now")
+                      : `Online: runs on ${m.provider}'s servers`;
+      b.onclick = () => { chooseModel(m.name); $("select").classList.remove("open"); };
+      rows.push(b);
+    }
+  }
+  const add = document.createElement("button");
+  add.className = "opt add"; add.textContent = "+ Add online model…";
+  add.onclick = e => { e.stopPropagation(); $("select").classList.remove("open"); openModal("model"); };
+  rows.push(add);
+  $("menu").replaceChildren(...rows);
   $("mem-hint").dataset.free = r.free;
   setOutdir(r.outdir, false);
-  chooseModel(r.default);
+  chooseModel(state.models.some(m => m.name === state.model) ? state.model : r.default);
+  renderVisionMenu(r);
 }
 function chooseModel(name) {
   const m = state.models.find(x => x.name === name);
   if (!m) return;
   state.model = name;
-  $("sel-val").textContent = name;
-  $("sel-meta").textContent = `${m.size.toFixed(1)} GB`;
-  $("sel-dot").className = "dot" + (m.fits ? "" : " no");
-  for (const o of $("menu").children) o.setAttribute("aria-selected", o.querySelector(".n").textContent === name);
+  const local = m.kind === "local";
+  $("sel-val").textContent = m.label;
+  $("sel-meta").textContent = local ? `${m.size.toFixed(1)} GB` : m.provider;
+  $("sel-dot").className = "dot" + (local ? (m.fits ? "" : " no") : " net");
+  for (const o of $("menu").querySelectorAll(".opt[data-name]")) o.setAttribute("aria-selected", o.dataset.name === name);
   const hint = $("mem-hint");
-  hint.textContent = m.fits ? `About ${hint.dataset.free} GB free — this model should fit.`
-                            : `About ${hint.dataset.free} GB free — this model may not fit. Close heavy apps or pick a smaller one.`;
-  hint.className = "hint" + (m.fits ? "" : " warn");
+  if (local) {
+    hint.textContent = m.fits ? `About ${hint.dataset.free} GB free — this model should fit.`
+                              : `About ${hint.dataset.free} GB free — this model may not fit. Close heavy apps or pick a smaller one.`;
+    hint.className = "hint" + (m.fits ? "" : " warn");
+  } else {
+    hint.textContent = `Online: your documents' text will be sent to ${m.provider}. Reading files and OCR stay on this PC.`;
+    hint.className = "hint warn";
+  }
+  refreshStatus();
   updateGo();
 }
-$("select-btn").onclick = e => { e.stopPropagation(); $("select").classList.toggle("open"); };
+
+/* ---------- image (vision) model ---------- */
+function renderVisionMenu(r) {
+  state.vision = r.vision; state.visionAuto = r.vision_auto;
+  const rows = [];
+  const special = [["auto", "Auto", r.vision_auto ? `best local · ${r.vision_auto}` : "no local vision model"],
+                   ["", "Off", "don't describe pictures"]];
+  for (const [name, label, tag] of special) {
+    const b = document.createElement("button");
+    b.className = "opt"; b.setAttribute("role", "option"); b.dataset.name = name;
+    b.innerHTML = `<span class="dot ${name ? "" : "no"}"></span><span class="n"></span><span class="size"></span>`;
+    b.querySelector(".n").textContent = label; b.querySelector(".size").textContent = tag;
+    b.onclick = () => { chooseVision(name); $("vselect").classList.remove("open"); };
+    rows.push(b);
+  }
+  const groups = [["local", "On this PC · offline"], ["cloud", "Ollama cloud · online"], ["api", "API providers · online · must accept images"]];
+  for (const [kind, title] of groups) {
+    const list = r.vision.filter(m => m.kind === kind);
+    if (!list.length) continue;
+    const h = document.createElement("div"); h.className = "grp"; h.textContent = title; rows.push(h);
+    for (const m of list) {
+      const b = document.createElement("button");
+      b.className = "opt"; b.setAttribute("role", "option"); b.dataset.name = m.name;
+      const local = kind === "local";
+      b.innerHTML = `<span class="dot ${local ? (m.fits ? "" : "no") : "net"}"></span><span class="n"></span>` +
+                    (local ? `<span class="size">${m.size.toFixed(1)} GB</span>` : `<span class="tag"></span>`);
+      b.querySelector(".n").textContent = m.label;
+      if (!local) b.querySelector(".tag").textContent = kind === "cloud" ? "cloud" : m.provider;
+      b.onclick = () => { chooseVision(m.name); $("vselect").classList.remove("open"); };
+      rows.push(b);
+    }
+  }
+  const add = document.createElement("button");
+  add.className = "opt add"; add.textContent = "+ Add online model…";
+  add.onclick = e => { e.stopPropagation(); $("vselect").classList.remove("open"); openModal("vision"); };
+  rows.push(add);
+  $("vmenu").replaceChildren(...rows);
+  const keep = state.visionModel !== undefined && (["", "auto"].includes(state.visionModel) || r.vision.some(m => m.name === state.visionModel));
+  chooseVision(keep ? state.visionModel : r.vision_default);
+}
+function visionInfo(name) {
+  if (name === "auto") return { kind: "auto", label: "Auto", meta: state.visionAuto || "none installed" };
+  if (name === "") return { kind: "off", label: "Off", meta: "" };
+  const m = state.vision.find(x => x.name === name);
+  return m ? { ...m, meta: m.kind === "local" ? `${m.size.toFixed(1)} GB` : m.provider } : null;
+}
+function chooseVision(name) {
+  const v = visionInfo(name);
+  if (!v) return chooseVision("auto");
+  state.visionModel = name;
+  $("vsel-val").textContent = v.label;
+  $("vsel-meta").textContent = v.meta;
+  $("vsel-dot").className = "dot" + (v.kind === "off" ? " no" : v.kind === "cloud" || v.kind === "api" ? " net" : "");
+  for (const o of $("vmenu").querySelectorAll(".opt[data-name]")) o.setAttribute("aria-selected", o.dataset.name === name);
+  const hint = $("v-hint");
+  const online = v.kind === "cloud" || v.kind === "api";
+  hint.className = "hint" + (online ? " warn" : "");
+  hint.textContent = v.kind === "off" ? "Pictures still go on slides, just with simpler titles and captions."
+    : v.kind === "auto" ? (state.visionAuto ? `Describes pictures on this PC with ${state.visionAuto}.` : "No local vision model installed — try ollama pull moondream.")
+    : online ? `Online: your pictures will be sent to ${v.provider}.`
+    : "Describes pictures on this PC.";
+  refreshStatus();
+}
+function refreshStatus() {
+  const m = state.models.find(x => x.name === state.model);
+  const v = visionInfo(state.visionModel ?? "auto");
+  const where = [m && m.kind !== "local" ? m.provider : null, v && (v.kind === "cloud" || v.kind === "api") ? v.provider : null]
+                .filter(Boolean).filter((x, i, a) => a.indexOf(x) === i);
+  if (where.length) setStatus("online", `Online · ${where.join(" + ")}`);
+  else if (state.ollamaBad) setStatus("bad", state.ollamaBad);
+  else setStatus("ok", "Offline · Ollama ready");
+}
+$("vselect-btn").onclick = e => { e.stopPropagation(); $("select").classList.remove("open");
+  $("vselect").classList.contains("open") ? $("vselect").classList.remove("open") : openMenu("vselect"); };
+document.addEventListener("click", () => $("vselect").classList.remove("open"));
+
+/* ---------- add-provider dialog ---------- */
+const slug = s => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "provider";
+let presets = {}, saved = [];
+function mMsg(text, kind) { const el = $("m-msg"); el.textContent = text; el.className = "m-msg" + (kind ? " " + kind : ""); }
+function renderSaved() {
+  $("m-saved").replaceChildren(...saved.map(p => {
+    const row = document.createElement("div"); row.className = "row";
+    row.innerHTML = `<b></b><span></span><button aria-label="Remove provider">Remove</button>`;
+    row.querySelector("b").textContent = p.name;
+    row.querySelector("span").textContent = p.models.join(", ") || "no models";
+    row.querySelector("button").onclick = async () => {
+      await pywebview.api.delete_provider(p.id);
+      saved = saved.filter(x => x.id !== p.id); renderSaved(); loadModels();
+    };
+    return row;
+  }));
+}
+function applyPreset() {
+  const name = $("m-preset").value;
+  const custom = name === "Custom";
+  const known = saved.find(p => p.id === slug(custom ? $("m-name").value : name));
+  if (!custom) { $("m-name").value = name; $("m-url").value = known ? known.base_url : presets[name]; }
+  else if (!$("m-url").value || Object.values(presets).includes($("m-url").value)) { $("m-name").value = ""; $("m-url").value = ""; }
+  $("m-key").value = "";
+  $("m-key").placeholder = known ? "Saved — leave empty to keep it" : "Paste your API key";
+  $("m-models").replaceChildren(); $("m-model").value = ""; mMsg("");
+}
+async function openModal(target = "model") {
+  state.modalTarget = target;
+  const r = await pywebview.api.provider_presets();
+  presets = r.presets; saved = r.saved;
+  $("m-preset").replaceChildren(...[...Object.keys(presets), "Custom"].map(n => new Option(n === "Custom" ? "Custom (any OpenAI-compatible URL)" : n, n)));
+  applyPreset(); renderSaved();
+  $("modal").classList.add("show"); $("m-key").focus();
+}
+function closeModal() { $("modal").classList.remove("show"); $("m-key").value = ""; }
+$("m-preset").onchange = applyPreset;
+$("m-cancel").onclick = closeModal;
+$("modal").onclick = e => { if (e.target === $("modal")) closeModal(); };
+$("m-load").onclick = async () => {
+  const name = $("m-name").value.trim(), url = $("m-url").value.trim();
+  if (!url) return mMsg("Enter the base URL first.", "err");
+  mMsg("Loading models…");
+  const r = await pywebview.api.provider_models(url, $("m-key").value.trim(), slug(name));
+  if (r.error) return mMsg(r.error, "err");
+  $("m-models").replaceChildren(...r.models.map(id => new Option(id, id)));
+  mMsg(`${r.models.length} models available — start typing to search.`, "ok");
+  $("m-model").focus();
+};
+$("m-save").onclick = async () => {
+  const name = $("m-name").value.trim(), url = $("m-url").value.trim(), model = $("m-model").value.trim();
+  if (!name || !url || !model) return mMsg("Name, base URL and model are all needed.", "err");
+  const r = await pywebview.api.save_provider(name, url, $("m-key").value.trim(), model);
+  if (r.error) return mMsg(r.error, "err");
+  closeModal();
+  await loadModels();
+  if (state.modalTarget === "vision") chooseVision(r.model); else chooseModel(r.model);
+};
+function openMenu(id) {
+  const sel = $(id), body = $("panel-body").getBoundingClientRect();
+  const btn = sel.querySelector(".select-btn").getBoundingClientRect();
+  const below = body.bottom - btn.bottom - 14, above = btn.top - body.top - 14;
+  const up = below < 240 && above > below;
+  sel.classList.toggle("up", up);
+  sel.querySelector(".menu").style.maxHeight = Math.max(160, Math.min(300, up ? above : below)) + "px";
+  sel.classList.add("open");
+}
+$("select-btn").onclick = e => { e.stopPropagation(); $("vselect").classList.remove("open");
+  $("select").classList.contains("open") ? $("select").classList.remove("open") : openMenu("select"); };
 document.addEventListener("click", () => $("select").classList.remove("open"));
 
 /* ---------- save location ---------- */
@@ -458,7 +706,7 @@ setOutdir("", false);
 const slider = $("n");
 function paintSlider() { slider.style.setProperty("--p", ((slider.value - slider.min) / (slider.max - slider.min) * 100) + "%"); $("n-out").textContent = slider.value; }
 slider.oninput = paintSlider; paintSlider();
-for (const id of ["t-anim", "t-vis"]) $(id).onclick = e => { e.preventDefault(); const t = $(id); t.setAttribute("aria-checked", t.getAttribute("aria-checked") !== "true"); };
+for (const id of ["t-anim"]) $(id).onclick = e => { e.preventDefault(); const t = $(id); t.setAttribute("aria-checked", t.getAttribute("aria-checked") !== "true"); };
 const on = id => $(id).getAttribute("aria-checked") === "true";
 
 function updateGo() {
@@ -472,7 +720,7 @@ slider.addEventListener("input", updateGo);
 $("go").onclick = async () => {
   resetRun("Building your deck");
   await pywebview.api.generate({ files: state.files, model: state.model, slides: +slider.value,
-                                 focus: $("focus").value, animate: on("t-anim"), vision: on("t-vis"),
+                                 focus: $("focus").value, animate: on("t-anim"), vision: state.visionModel ?? "auto",
                                  outdir: state.outdir });
 };
 
@@ -483,6 +731,12 @@ function resetRun(headline) {
   $("error").classList.remove("show"); $("result").classList.remove("show"); $("log").replaceChildren();
   for (const s of $("steps").children) s.className = "step idle";
   state.t0 = Date.now();
+  clearInterval(state.timer);
+  state.timer = setInterval(() => {
+    if (!state.busy) return clearInterval(state.timer);
+    const s = Math.round((Date.now() - state.t0) / 1000);
+    $("subline").textContent = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")} elapsed · bigger models take longer.`;
+  }, 1000);
 }
 function setStage(stage, detail) {
   const idx = ORDER.indexOf(stage);
@@ -492,7 +746,10 @@ function setStage(stage, detail) {
       /^deck:/i.test(detail) ? "Saving the deck and rendering previews" : detail;
   });
 }
-function setStatus(ok, text) { $("status").classList.toggle("bad", !ok); $("status-txt").textContent = text; }
+function setStatus(mode, text) {  // mode: ok | online | bad
+  $("status").classList.toggle("bad", mode === "bad"); $("status").classList.toggle("online", mode === "online");
+  $("status-txt").textContent = text;
+}
 function showError(text) { const e = $("error"); e.textContent = text; e.classList.add("show"); }
 function logLine(text, level) {
   const d = document.createElement("div"); d.className = level; d.textContent = text;
@@ -530,7 +787,7 @@ $("b-folder").onclick = () => pywebview.api.open_path(state.last.folder);
 $("b-edit").onclick = () => pywebview.api.edit_spec(state.last.spec);
 $("b-rebuild").onclick = async () => { const spec = state.last.spec; resetRun("Rebuilding from your edits"); await pywebview.api.rebuild(spec); };
 $("lightbox").onclick = () => $("lightbox").classList.remove("show");
-document.addEventListener("keydown", e => { if (e.key === "Escape") { $("lightbox").classList.remove("show"); $("select").classList.remove("open"); } });
+document.addEventListener("keydown", e => { if (e.key === "Escape") { $("lightbox").classList.remove("show"); $("select").classList.remove("open"); $("vselect").classList.remove("open"); closeModal(); } });
 
 window.addEventListener("pywebviewready", loadModels);
 </script>

@@ -283,14 +283,40 @@ MAX_DESCRIBED = 12  # images described per run; each takes a few seconds
 IMG_REF = re.compile(r"!\[image\]\(assets/([^)]+)\)")
 
 
+VISION_PROMPT = ("Describe this image in 2-3 factual sentences for someone building a slide deck: "
+                 "what it shows, and any text, numbers or labels visible. Do not guess.")
+
+
+NO_SIGHT = re.compile(
+    r"\b(unable to|not able to|can ?not|can't|don't have the ability to) (view|see|process|analy[sz]e|access|interpret) "
+    r"(the |any |this )?(image|picture|photo)|\bas a text-based\b|\bno image (was|is) (provided|attached)", re.I)
+
+
+def vision_capable(name: str) -> bool:
+    """Ask Ollama whether a model accepts images (newer Ollama reports 'capabilities');
+    fall back to well-known vision model names."""
+    try:
+        req = urllib.request.Request(f"{OLLAMA}/api/show", json.dumps({"model": name}).encode(),
+                                     {"Content-Type": "application/json"})
+        with urllib.request.urlopen(req, timeout=5) as r:
+            caps = json.loads(r.read()).get("capabilities")
+        if caps is not None:
+            return "vision" in caps
+    except (urllib.error.URLError, OSError, ValueError):
+        pass
+    base = name.split(":")[0].lower()
+    return base in VISION_PREFS or "vision" in base or base.endswith("vl")
+
+
 def vision_candidates(preferred: str | None) -> list[str]:
-    """Installed offline vision models, best first. Empty if Ollama is down or none installed."""
+    """The chosen vision model first, then installed *local* vision models, best first.
+    Falling back to local models (never to an online one) keeps pictures on this PC."""
     try:
         with urllib.request.urlopen(f"{OLLAMA}/api/tags", timeout=5) as r:
             names = [m["name"] for m in json.loads(r.read())["models"]]
     except (urllib.error.URLError, OSError, KeyError, ValueError):
-        return []
-    names = [n for n in names if "cloud" not in n]
+        names = []
+    names = [n for n in names if not is_online(n)]
     found = [n for pref in VISION_PREFS for n in names if n.split(":")[0] == pref]
     if preferred:
         found = [preferred] + [n for n in found if n != preferred]
@@ -298,7 +324,7 @@ def vision_candidates(preferred: str | None) -> list[str]:
 
 
 def describe_image(model: str, path: Path) -> str:
-    """Short factual description from a local vision model ('' on failure)."""
+    """Short factual description of one picture: Ollama (local or cloud) or an API provider."""
     import base64
     import io
     with Image.open(path) as im:
@@ -306,15 +332,21 @@ def describe_image(model: str, path: Path) -> str:
         im.thumbnail((1024, 1024))  # smaller = much faster, still enough detail
         buf = io.BytesIO()
         im.save(buf, "JPEG", quality=85)
-    body = json.dumps({
-        "model": model, "stream": False, "keep_alive": 0,  # free memory for the slide model
-        "prompt": "Describe this image in 2-3 factual sentences for someone building a slide deck: "
-                  "what it shows, and any text, numbers or labels visible. Do not guess.",
-        "images": [base64.b64encode(buf.getvalue()).decode()],
-        "options": {"temperature": 0.2, "num_ctx": 4096}}).encode()
-    req = urllib.request.Request(f"{OLLAMA}/api/generate", body, {"Content-Type": "application/json"})
-    with urllib.request.urlopen(req, timeout=600) as r:
-        return json.loads(r.read()).get("response", "").strip()
+    b64 = base64.b64encode(buf.getvalue()).decode()
+    if model.startswith("api:"):
+        import providers
+        text = providers.describe_image(model, b64, VISION_PROMPT, 400, 300)
+    else:
+        body = json.dumps({
+            "model": model, "stream": False, "keep_alive": 0,  # free memory for the slide model
+            "prompt": VISION_PROMPT, "images": [b64],
+            "options": {"temperature": 0.2, "num_ctx": 4096, "num_predict": 400}}).encode()
+        req = urllib.request.Request(f"{OLLAMA}/api/generate", body, {"Content-Type": "application/json"})
+        with urllib.request.urlopen(req, timeout=600) as r:
+            text = json.loads(r.read()).get("response", "").strip()
+    if NO_SIGHT.search(text[:300]):  # text-only models may answer instead of erroring
+        raise ValueError("model can't see images")
+    return text
 
 
 def add_image_descriptions(md: str, assets: Path, preferred: str | None) -> str:
@@ -328,6 +360,8 @@ def add_image_descriptions(md: str, assets: Path, preferred: str | None) -> str:
         log.warning("no offline vision model installed (e.g. `ollama pull moondream`); "
                     "images without text will not be described")
         return md
+    if is_online(models[0]):
+        log.warning("image model %s is online - the pictures will be sent to it", model_label(models[0]))
     descriptions = {}
     for name in names:
         while models:
@@ -336,8 +370,9 @@ def add_image_descriptions(md: str, assets: Path, preferred: str | None) -> str:
                 descriptions[name] = describe_image(models[0], assets / name)
                 VISION_USED.add(models[0])
                 break
-            except urllib.error.HTTPError as e:  # usually "not enough memory": try a smaller model
-                log.warning("%s failed (%s); trying the next vision model", models[0], e.code)
+            except (urllib.error.HTTPError, ValueError) as e:  # memory, no image support, bad key...
+                reason = e.code if isinstance(e, urllib.error.HTTPError) else e
+                log.warning("%s failed (%s); trying the next vision model", models[0], reason)
                 models.pop(0)
             except (urllib.error.URLError, OSError) as e:
                 log.warning("could not describe %s (%s)", name, e)
@@ -398,6 +433,7 @@ REQUIRED = {"title": ["title"], "section": ["title"], "bullets": ["title", "bull
 def validate(spec: dict, base: Path) -> list[str]:
     if not isinstance(spec, dict) or not isinstance(spec.get("slides"), list) or not spec["slides"]:
         return ['top level must be an object with a non-empty "slides" list']
+    normalize(spec)
     errors = []
     for i, s in enumerate(spec["slides"], 1):
         t = s.get("type") if isinstance(s, dict) else None
@@ -411,10 +447,68 @@ def validate(spec: dict, base: Path) -> list[str]:
                 vals = ser.get("values") or []
                 if len(vals) != n or not all(isinstance(v, (int, float)) for v in vals):
                     errors.append(f"slide {i}: series {ser.get('name')!r} needs {n} numeric values")
-        for key in ("image",):
-            if s.get(key) and not (base / s[key]).exists():
-                errors.append(f"slide {i}: image not found: {s[key]}")
+        img = s.get("image")
+        if img and not isinstance(img, str):
+            errors.append(f'slide {i}: "image" must be a path string like "assets/name.png"')
+        elif img and not (base / img).exists():
+            errors.append(f"slide {i}: image not found: {img}")
     return errors
+
+
+def _text(v) -> str:
+    """A list item a model wrote as an object -> plain text ('Lead: detail')."""
+    if isinstance(v, dict):
+        head = next((v[k] for k in ("title", "label", "heading", "name") if isinstance(v.get(k), str)), "")
+        body = next((v[k] for k in ("text", "detail", "description", "content", "value") if isinstance(v.get(k), str)), "")
+        return f"{head}: {body}" if head and body else head or body or json.dumps(v, ensure_ascii=False)
+    return str(v)
+
+
+DEFAULT_TITLES = {"title": "Overview", "section": "Next", "bullets": "Key points", "cards": "Highlights",
+                  "steps": "Steps", "stats": "By the numbers", "code": "Command", "table": "Details",
+                  "chart": "The numbers", "image": "Picture", "closing": "Key takeaways"}
+
+
+def normalize(spec: dict) -> None:
+    """Fix the shapes small local models commonly get wrong, in place, before validation:
+    image as an object, a single bullet as a string, list items as objects, numbers as text."""
+    for s in spec.get("slides", []) if isinstance(spec, dict) else []:
+        if not isinstance(s, dict):
+            continue
+        if not str(s.get("title") or "").strip() and s.get("type") in DEFAULT_TITLES:
+            # small models often drop titles; a placeholder beats failing the whole run
+            s["title"] = s.get("kicker") or (spec.get("title") if s["type"] == "title" else "") \
+                or DEFAULT_TITLES[s["type"]]
+        img = s.get("image")
+        if isinstance(img, list):
+            img = img[0] if img else ""
+        if isinstance(img, dict):
+            s.setdefault("caption", img.get("caption") or img.get("alt") or "")
+            img = next((img[k] for k in ("path", "src", "file", "url", "image") if isinstance(img.get(k), str)), "")
+        if img is not None:
+            s["image"] = img
+        for key in ("bullets", "items"):
+            if isinstance(s.get(key), str):
+                s[key] = [s[key]]
+            if isinstance(s.get(key), list):
+                s[key] = [_text(x) for x in s[key]]
+        for key, field in (("cards", "title"), ("steps", "title"), ("stats", "value")):
+            if isinstance(s.get(key), list):  # items written as plain strings
+                s[key] = [x if isinstance(x, dict) else {field: str(x)} for x in s[key]]
+        for key in ("header", "categories"):
+            if isinstance(s.get(key), list):
+                s[key] = [_text(x) for x in s[key]]
+        if isinstance(s.get("rows"), list):
+            s["rows"] = [[_text(c) for c in r] if isinstance(r, list) else [_text(r)] for r in s["rows"]]
+        for ser in s.get("series") or []:
+            if isinstance(ser, dict) and isinstance(ser.get("values"), list):
+                vals = []
+                for v in ser["values"]:
+                    try:
+                        vals.append(float(str(v).replace(",", "").rstrip("%")) if isinstance(v, str) else v)
+                    except ValueError:
+                        vals.append(v)  # left for validate() to report
+                ser["values"] = [int(v) if isinstance(v, float) and v.is_integer() else v for v in vals]
 
 
 # ---------------------------------------------------------------- rendering
@@ -972,24 +1066,81 @@ SOURCE DOCUMENTS:
 {content}"""
 
 
+RETIRED_FILE = Path(__file__).with_name(".retired_models")  # cloud models Ollama has retired
+
+
+def retired_models() -> set[str]:
+    try:
+        return set(RETIRED_FILE.read_text(encoding="utf-8").split())
+    except OSError:
+        return set()
+
+
+def mark_retired(model: str) -> None:
+    """Remember a retired cloud model so menus stop offering it (its local tag still exists)."""
+    try:
+        RETIRED_FILE.write_text("\n".join(sorted(retired_models() | {model})), encoding="utf-8")
+    except OSError:
+        pass
+
+
+def is_online(model: str) -> bool:
+    """API-provider models and Ollama cloud models run on someone else's servers."""
+    return model.startswith("api:") or model.endswith(":cloud") or "-cloud" in model
+
+
+def model_label(model: str) -> str:
+    if model.startswith("api:"):
+        import providers
+        return providers.label(model)
+    return f"{model} (Ollama cloud)" if is_online(model) else f"{model} (Ollama, local)"
+
+
+def ask_llm(model: str, prompt: str) -> str:
+    """Route to an OpenAI-compatible API provider (api:<id>:<model>) or to Ollama."""
+    if model.startswith("api:"):
+        import providers
+        try:
+            return providers.chat_json(model, prompt, MAX_REPLY_TOKENS, REPLY_TIMEOUT)
+        except ValueError as e:
+            sys.exit(str(e))
+    return ask_ollama(model, prompt)
+
+
+MAX_REPLY_TOKENS = 6144   # a 20-slide spec is ~4k tokens
+REPLY_TIMEOUT = 1800      # seconds per model reply
+
+
 def ask_ollama(model: str, prompt: str) -> str:
     # Context sized to the prompt (~3.5 chars/token) + room for the reply, in 8k steps.
     # A fixed 32k window reserves several GB of memory even for a short document.
-    num_ctx = min(32768, math.ceil((len(prompt) / 3.5 + 4096) / 8192) * 8192)
+    num_ctx = min(32768, math.ceil((len(prompt) / 3.5 + MAX_REPLY_TOKENS) / 8192) * 8192)
     body = json.dumps({"model": model, "stream": False, "format": "json",
                        "messages": [{"role": "user", "content": prompt}],
-                       "options": {"temperature": 0.3, "num_ctx": num_ctx}}).encode()
+                       # num_predict caps the reply: in JSON mode small models can loop forever
+                       # (e.g. endless whitespace); a capped, cut-off reply just fails validation
+                       # and gets retried instead of hanging until the timeout.
+                       "options": {"temperature": 0.3, "num_ctx": num_ctx,
+                                   "num_predict": MAX_REPLY_TOKENS, "repeat_penalty": 1.1}}).encode()
     req = urllib.request.Request(f"{OLLAMA}/api/chat", body, {"Content-Type": "application/json"})
     try:
-        with urllib.request.urlopen(req, timeout=1800) as r:
+        with urllib.request.urlopen(req, timeout=REPLY_TIMEOUT) as r:
             return json.loads(r.read())["message"]["content"]
+    except TimeoutError:  # raised directly (not as URLError) when the reply is too slow
+        sys.exit(f"{model} did not finish within {REPLY_TIMEOUT // 60} minutes. It may be too big for the "
+                 "free memory (running partly on the CPU) - try a smaller model or fewer slides.")
     except urllib.error.HTTPError as e:  # Ollama is up but refused, e.g. not enough memory
         try:
             reason = json.loads(e.read()).get("error", str(e))
         except Exception:
             reason = str(e)
-        hint = (" Close other heavy apps, or pick a smaller model with -m."
-                if "memory" in reason else "")
+        if "retired" in reason.lower() or e.code == 410:
+            mark_retired(model)
+            sys.exit(f"{model} no longer exists: Ollama retired this cloud model ({reason}). It is now hidden "
+                     f"from the app's menus. Pick another model; you can also remove it with `ollama rm {model}`.")
+        hint = (" Close other heavy apps, or pick a smaller model with -m." if "memory" in reason else
+                " Ollama cloud models need you to be signed in: run `ollama signin`."
+                if "unauthorized" in reason.lower() or e.code == 401 else "")
         sys.exit(f"Ollama error: {reason}.{hint}")
     except urllib.error.URLError as e:
         sys.exit(f"Cannot reach Ollama at {OLLAMA} ({e}). Is `ollama serve` running?")
@@ -1058,8 +1209,9 @@ def add_missing_images(spec: dict, files: list[Path], source: str) -> list[str]:
 def auto(files: list[Path], out: Path | None, model: str, slides: int, extra: str,
          preview: bool, animate: bool = True, vision: str | None = "auto",
          workdir: Path | None = None) -> Path:
-    if model.endswith(":cloud") or "-cloud" in model:
-        log.warning("%s is an Ollama cloud model - this run will NOT be offline", model)
+    if is_online(model):
+        log.warning("%s is an online model - the extracted document text will be sent to it "
+                    "(file reading, OCR and image descriptions still run locally)", model_label(model))
     first = files[0]
     work = workdir or first.parent / f"{first.stem}_ppt"  # extract, assets, spec, previews
     md = extract_all(files, work, vision)
@@ -1072,7 +1224,7 @@ def auto(files: list[Path], out: Path | None, model: str, slides: int, extra: st
     spec_path = work / "spec.json"
     for attempt in range(3):
         log.info("asking %s for a slide spec (attempt %d) - this can take a few minutes", model, attempt + 1)
-        reply = ask_ollama(model, prompt)
+        reply = ask_llm(model, prompt)
         try:
             spec = json.loads(reply)
             errors = validate(spec, work) + content_checks(spec, content)
@@ -1096,11 +1248,13 @@ def auto(files: list[Path], out: Path | None, model: str, slides: int, extra: st
         log.info("added slides for images the model skipped: %s", ", ".join(added))
     spec_path.write_text(json.dumps(spec, indent=2, ensure_ascii=False), encoding="utf-8")
     print(f"Spec: {spec_path} (edit it and run `build` to tweak the deck)")
-    offline = not (model.endswith(":cloud") or "-cloud" in model)
+    online_parts = [w for w, on in (("document text", is_online(model)),
+                                    ("pictures", any(is_online(m) for m in VISION_USED))) if on]
+    where = (f"ONLINE - {' and '.join(online_parts)} sent to an online model" if online_parts else "OFFLINE")
     spec["made_with"] = (
-        f"Made {'OFFLINE' if offline else 'with a CLOUD model (NOT offline)'} by make_ppt.py on "
-        f"{__import__('datetime').date.today()}. Slide content: {model} (Ollama). "
-        f"Image descriptions: {', '.join(sorted(VISION_USED)) or 'none'}. "
+        f"Made {where}, by make_ppt.py on {__import__('datetime').date.today()}. "
+        f"Slide content: {model_label(model)}. "
+        f"Image descriptions: {', '.join(model_label(m) for m in sorted(VISION_USED)) or 'none'}. "
         f"OCR: {('Tesseract ' + ', '.join(sorted(OCR_USED))) if OCR_USED else 'not needed'}. "
         "File reading, layout and rendering: local Python + LibreOffice.")
     spec_path.write_text(json.dumps(spec, indent=2, ensure_ascii=False), encoding="utf-8")
