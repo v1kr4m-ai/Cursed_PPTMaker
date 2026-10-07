@@ -984,6 +984,7 @@ function updateGo() {
   const ready = state.files.length && state.model && !state.busy;
   $("go").disabled = !ready && !state.busy;
   $("go").classList.toggle("cancel", state.busy);
+  $("open-old").hidden = state.busy;
   $("steps").classList.toggle("running", state.busy);
   $("go-txt").textContent = state.busy ? "Cancel" : !state.files.length ? "Add files to start"
                           : state.slideMode === "auto" ? "Generate deck"

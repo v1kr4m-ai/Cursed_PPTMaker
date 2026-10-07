@@ -159,6 +159,8 @@ click any chip to jump straight to that setting.
 | **Result** | open the deck or its folder, click thumbnails to enlarge, see the offline stamp, and **Edit slides** |
 | **Edit slides** | a slide editor (no JSON): drag or ↑↓ to reorder, ✕ to remove, **+ Add slide** (blank or *Write with AI*), a form per slide (title, bullets, cards, table, chart data, picture, notes…), **Rewrite this slide with AI** for one slide only, **Refresh previews**, then **Export PPT…** to save a new deck. Edits are kept in `spec.json`; **Edit a deck made earlier…** under Generate reopens any deck's `spec.json` |
 
+![The slide editor: reorder, add, remove and edit slides, then export](docs/images/app-editor.png)
+
 Only one window runs at a time (a second launch just tells you it is already open).
 The app uses Windows' built-in Edge WebView2 to draw its interface — no browser or
 internet needed.
