@@ -270,51 +270,157 @@ class Api:
     def open_path(self, path: str) -> None:
         os.startfile(path)
 
-    def edit_spec(self, path: str) -> None:
-        subprocess.Popen(["notepad.exe", path])
+    # -- slide editor ------------------------------------------------------
+    # The editor works on a copy of spec.json in the page; these calls save it, preview it,
+    # export it and ask the model for single slides. Keys starting with "_" are the page's own.
+
+    @staticmethod
+    def _spec_thumbs(spec_dir: Path) -> list[str]:
+        """One preview per spec slide (a long slide's continuation slides are skipped).
+        No map = the spec changed since the last build, so the previews no longer match."""
+        try:
+            first = json.loads((spec_dir / "slide_map.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return []
+        thumbs = thumbnails(spec_dir / "preview")
+        return [thumbs[j] if j < len(thumbs) else "" for j in first]
+
+    def load_spec(self, path: str) -> dict:
+        spec_path = Path(path)
+        try:
+            spec = json.loads(spec_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as e:
+            return {"error": f"Could not read {spec_path.name}: {e}"}
+        decks = sorted(spec_path.parent.parent.glob(f"{spec_path.parent.name.removesuffix('_ppt')}*.pptx"),
+                       key=lambda p: p.stat().st_mtime)
+        return {"spec": spec, "thumbs": self._spec_thumbs(spec_path.parent),
+                "deck": str(decks[-1]) if decks else "", "families": {k: f["name"] for k, f in FAMILIES.items()}}
+
+    def _save_spec(self, path: str, spec: dict) -> list[str]:
+        spec = {**spec, "slides": [{k: v for k, v in s.items() if not k.startswith("_") and v not in ("", [], None)}
+                                   for s in spec.get("slides", [])]}
+        spec_path = Path(path)
+        errors = mp.validate(spec, spec_path.parent)
+        text = json.dumps(spec, indent=2, ensure_ascii=False)
+        if not spec_path.exists() or spec_path.read_text(encoding="utf-8") != text:
+            (spec_path.parent / "slide_map.json").unlink(missing_ok=True)  # previews are now stale
+            spec_path.write_text(text, encoding="utf-8")
+        return errors
+
+    def _quiet(self, fn):
+        """Run make_ppt code from a JS call: stdout goes to the log, sys.exit becomes an error."""
+        if self._busy:
+            return {"error": "Busy with another job - wait for it to finish."}
+        self._busy = True
+        mp.STOP.clear()
+        mp.SKIP.clear()
+        try:
+            with contextlib.redirect_stdout(UIWriter(self)):
+                return fn()
+        except mp.Cancelled:
+            return {"error": "Cancelled."}
+        except SystemExit as e:
+            return {"error": str(e.code or e)}
+        except Exception as e:
+            self._push({"type": "log", "text": traceback.format_exc(), "level": "error"})
+            return {"error": f"{type(e).__name__}: {e}"}
+        finally:
+            self._busy = False
+
+    def save_spec(self, path: str, spec: dict) -> dict:
+        return {"errors": self._save_spec(path, spec)}
+
+    def preview_spec(self, path: str, spec: dict) -> dict:
+        """Build a scratch deck from the edited spec and return fresh slide thumbnails."""
+        def run():
+            if errors := self._save_spec(path, spec):
+                return {"error": "Fix these first:\n" + "\n".join(errors)}
+            scratch = Path(path).parent / "_editor_preview.pptx"
+            mp.build(Path(path), scratch, True)
+            scratch.unlink(missing_ok=True)
+            return {"thumbs": self._spec_thumbs(Path(path).parent)}
+        return self._quiet(run)
+
+    def export_deck(self, path: str, spec: dict, suggested: str) -> dict:
+        """Ask where to save, then build the edited deck there."""
+        if errors := self._save_spec(path, spec):
+            return {"error": "Fix these first:\n" + "\n".join(errors)}
+        picked = self._window.create_file_dialog(webview.FileDialog.SAVE, save_filename=suggested,
+                                                 directory=str(Path(path).parent.parent),
+                                                 file_types=("PowerPoint (*.pptx)",))
+        if not picked:
+            return {}
+        out = Path(picked if isinstance(picked, str) else picked[0])
+        out = out.with_suffix(".pptx")
+
+        def run():
+            deck = mp.build(Path(path), out, True)
+            return {"deck": str(deck), "folder": str(deck.parent), "name": deck.name,
+                    "thumbs": self._spec_thumbs(Path(path).parent), "all_thumbs": thumbnails(Path(path).parent / "preview")}
+        return self._quiet(run)
+
+    def pick_image(self, path: str) -> str:
+        """Choose a picture for a slide; it is copied into the deck's assets folder."""
+        picked = self._window.create_file_dialog(webview.FileDialog.OPEN, file_types=(
+            "Pictures (*.png;*.jpg;*.jpeg;*.bmp;*.gif;*.webp)",))
+        if not picked:
+            return ""
+        src = Path(picked[0])
+        assets = Path(path).parent / "assets"
+        assets.mkdir(exist_ok=True)
+        dst = assets / src.name
+        if dst.resolve() != src.resolve():
+            shutil.copy2(src, dst)
+        return f"assets/{src.name}"
+
+    def ai_slide(self, path: str, spec: dict, index: int, instruction: str, insert: bool, model: str) -> dict:
+        def run():
+            slide = mp.ai_slide(model, spec, Path(path).parent, index, instruction.strip(), insert)
+            return {"slide": slide}
+        return self._quiet(run)
 
     def generate(self, opts: dict) -> bool:
         if self._busy:
             return False
         self._busy = True
-        threading.Thread(target=self._job, args=("auto", opts), daemon=True).start()
+        threading.Thread(target=self._job, args=(opts,), daemon=True).start()
         return True
 
-    def rebuild(self, spec: str) -> bool:
-        if self._busy:
-            return False
-        self._busy = True
-        threading.Thread(target=self._job, args=("build", {"spec": spec}), daemon=True).start()
-        return True
+    def cancel(self) -> None:
+        mp.STOP.set()
+
+    def skip(self, stage: str) -> None:
+        """look = stop describing pictures, write = stop retrying (keep the best spec so far),
+        preview = no slide previews."""
+        mp.SKIP.add(stage)
 
     # -- worker ------------------------------------------------------------
-    def _job(self, kind: str, opts: dict) -> None:
+    def _job(self, opts: dict) -> None:
         start = time.time()
+        mp.STOP.clear()
+        mp.SKIP.clear()
         mp.OCR_USED.clear()
         mp.VISION_USED.clear()
         try:
             with contextlib.redirect_stdout(UIWriter(self)):
-                if kind == "auto":
-                    files = [Path(f) for f in opts["files"]]
-                    LAST_MODEL.write_text(opts["model"])
-                    LAST_VISION.write_text(opts.get("vision", "auto"), encoding="utf-8")
-                    LAST_DESIGN.write_text(opts.get("design", ""), encoding="utf-8")
-                    design = opts.get("design") or None
-                    outdir = Path(opts.get("outdir") or files[0].parent)
-                    outdir.mkdir(parents=True, exist_ok=True)
-                    work = outdir / f"{files[0].stem}_ppt"
-                    deck = mp.auto(files, free_path(outdir / files[0].name), opts["model"], int(opts["slides"]),
-                                   opts.get("focus", "").strip(), True, opts.get("animate", True),
-                                   opts.get("vision", "auto") or None, work, design)
-                    spec = work / "spec.json"
-                else:
-                    spec = Path(opts["spec"])
-                    self._push({"type": "stage", "stage": "render", "detail": "Rebuilding from spec"})
-                    deck = mp.build(spec, free_path(spec.parent.with_name(spec.parent.name.removesuffix("_ppt"))))
+                files = [Path(f) for f in opts["files"]]
+                LAST_MODEL.write_text(opts["model"])
+                LAST_VISION.write_text(opts.get("vision", "auto"), encoding="utf-8")
+                LAST_DESIGN.write_text(opts.get("design", ""), encoding="utf-8")
+                design = opts.get("design") or None
+                outdir = Path(opts.get("outdir") or files[0].parent)
+                outdir.mkdir(parents=True, exist_ok=True)
+                work = outdir / f"{files[0].stem}_ppt"
+                deck = mp.auto(files, free_path(outdir / files[0].name), opts["model"], int(opts["slides"]),
+                               opts.get("focus", "").strip(), True, opts.get("animate", True),
+                               opts.get("vision", "auto") or None, work, design, opts.get("slide_mode", "exact"))
+                spec = work / "spec.json"
             from pptx import Presentation
             self._push({"type": "done", "deck": str(deck), "name": deck.name, "folder": str(deck.parent),
                        "spec": str(spec), "made_with": Presentation(deck).core_properties.comments,
-                       "seconds": round(time.time() - start), "thumbs": thumbnails(spec.parent / "preview")})
+                       "seconds": round(time.time() - start), "thumbs": [] if "preview" in mp.SKIP else thumbnails(spec.parent / "preview")})
+        except mp.Cancelled:
+            self._push({"type": "cancelled"})
         except SystemExit as e:  # make_ppt reports user-facing problems this way
             self._push({"type": "error", "text": str(e.code or e)})
         except Exception as e:

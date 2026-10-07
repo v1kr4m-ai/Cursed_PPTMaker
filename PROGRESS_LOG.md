@@ -213,3 +213,42 @@
   later) -> TDZ ReferenceError stopped the whole script (status stuck "Checking Ollama...").
 - Tested in a hidden window: chip opens drawer, both dropdowns fit inside it, summary updates,
   Done closes. Remembered choices restored to phi4 / Auto / Default.
+
+## 2026-10-06 — Cancel, Skip, hints, thinking-model fix
+- Why only phi4 worked: thinking models (qwen3, deepseek-r1, gpt-oss) spent the reply budget on
+  hidden reasoning. Probe on the two-wheeler PDF: gpt-oss:20b used all 6144 tokens thinking ->
+  empty reply. Tried `think: false`: qwen3 then ran away (22k-char replies) or wrote placeholder
+  slides. Fix kept: thinking stays on, models whose /api/show lists "thinking" get +8192 reply
+  tokens, gpt-oss thinks "low". Also: markdown table rows ("|---|") were counted as commands, so
+  every table document demanded a code slide and burned retries - fixed. Also content_checks (missing code slide, too
+  many sections, invented chart numbers) are now retried but no longer fail the run; only a spec
+  that can't render fails.
+- Cancel: Generate turns into Cancel while running. make_ppt.STOP / SKIP + interruptible() runs
+  slow calls on a helper thread so Cancel/Skip act at once; Ollama calls stream so the
+  connection closes and Ollama stops generating. Checkpoints per file and per PDF page.
+- Skip buttons on the pictures / write / build steps (look = stop describing, write = keep best
+  spec so far, build = no previews).
+- Focus field renamed "Hints for the model" (2-line box); the prompt now labels hints as user
+  instructions that override the rules.
+- REAL root cause (measured with prompt_eval_count): the context window was sized at 3.5
+  chars/token, but qwen3 tokenizes the number-heavy price list at 1.83 chars/token -> 17,328
+  prompt tokens in a 16,384 window. Ollama dropped the start of the prompt (schema + rules), so
+  the model wrote "Slide 1 / content" placeholders. phi4's tokenizer needed 12,681 -> fit, which
+  is why only phi4 worked. Fix: CHARS_PER_TOKEN = 1.8, window = prompt + reply budget (4k steps,
+  max 32k), and the source is cut to what fits (source_limit) instead of a flat 60k chars.
+
+## 2026-10-07 — Slide editor and slide-count modes
+- Slides: Model decides / At least N / About N (segmented control; remembered). Prompt line from
+  count_rule(); "at least" adds a retry complaint when the spec is short. CLI: -n 0, --at-least.
+- Slide editor (replaces Notepad JSON + Rebuild): list with thumbnails, drag/↑↓ reorder, remove,
+  add blank or AI-written slide after the selected one, per-type form, "Rewrite this slide with
+  AI" (make_ppt.ai_slide: one slide from outline + source + instruction, validated, 3 tries),
+  Refresh previews (scratch build), Export PPT… (save dialog, new file). Closing saves spec.json.
+  "Edit a deck made earlier…" opens any spec.json.
+- Thumbnail alignment: long slides continue onto extra deck slides, so build() now writes
+  slide_map.json (spec slide -> first deck slide); any spec change deletes it, so stale previews
+  are never shown against the wrong slide.
+- Removed: rebuild() / edit_spec() and the Notepad flow.
+- Tested: API (load, reorder/delete, preview 5 s, page-only keys stripped, AI insert with
+  llama3.2, validation errors), slide_map on the example deck (16 deck slides -> 15 spec slides),
+  headless renders of editor and main panel.

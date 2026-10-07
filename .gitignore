@@ -7,3 +7,4 @@ examples/preview/
 .last_design
 PPT_Designs/*
 !PPT_Designs/README.md
+slide_map.json

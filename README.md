@@ -141,7 +141,7 @@ Everything is downloaded once. After that, the whole pipeline runs without inter
 Double-click **`Cursed PPTMaker.bat`** (it starts `app.py` without a console window).
 
 The main card holds only what you change every time: **Sources**, a **Using** row of chips
-showing your current model, image model, design and save folder, **Slides**, **Focus** and
+showing your current model, image model, design and save folder, **Slides**, **Hints for the model** and
 **Generate**. Everything else lives in **⚙ Settings** (top right, next to the status badge);
 click any chip to jump straight to that setting.
 
@@ -149,13 +149,15 @@ click any chip to jump straight to that setting.
 |---|---|
 | **Sources** | drop files onto the window, or click to browse; remove any with ✕ |
 | **Model** | grouped as *On this PC* (offline, with sizes; blue dot = fits in free memory now, grey = may not), *Ollama cloud* and *API providers* (online, amber dot); **+ Add online model…** adds an API provider |
-| **Slides / Focus** | slide count (4–20) and optional guidance such as `audience: management` |
+| **Slides / Hints** | *Model decides* (the model picks how many the content needs), *At least N* (it may write more, never fewer) or *About N* (4–20); plus optional hints the model must follow, e.g. `audience: management, write in Hindi, one slide per product` |
 | **Image model** | which model describes your pictures: *Auto* (best local vision model), *Off*, a specific local vision model, an Ollama cloud vision model, or an API model that accepts images; online choices are marked amber |
 | **Design** | *Default style* or one of six design families, shown as live previews; each has its own covers, section slides, step/card/number layouts, fonts and colours |
 | **Animations** | fade transitions and entrance animations on or off |
 | **Save to** | choose a folder for the deck and its working files, or ✕ to save next to the first source file (remembered between sessions) |
 | **Progress** | four steps light up as it reads, looks at pictures, writes and builds; *Details* shows the full log |
-| **Result** | open the deck or its folder, edit `spec.json` in Notepad and **Rebuild** in seconds, click thumbnails to enlarge, and see the offline stamp |
+| **Cancel / Skip** | while a run is going, **Generate** turns into **Cancel** (stops at once, including the model's reply). Each step that can be skipped has a **Skip** button, before or while it runs: *pictures* = go on without (more) image descriptions, *write* = stop retrying and use the best slide plan so far, *build* = save the deck without previews |
+| **Result** | open the deck or its folder, click thumbnails to enlarge, see the offline stamp, and **Edit slides** |
+| **Edit slides** | a slide editor (no JSON): drag or ↑↓ to reorder, ✕ to remove, **+ Add slide** (blank or *Write with AI*), a form per slide (title, bullets, cards, table, chart data, picture, notes…), **Rewrite this slide with AI** for one slide only, **Refresh previews**, then **Export PPT…** to save a new deck. Edits are kept in `spec.json`; **Edit a deck made earlier…** under Generate reopens any deck's `spec.json` |
 
 Only one window runs at a time (a second launch just tells you it is already open).
 The app uses Windows' built-in Edge WebView2 to draw its interface — no browser or
@@ -203,7 +205,8 @@ python make_ppt.py schema
 | Option | Applies to | Meaning |
 |---|---|---|
 | `-m, --model` | auto | Ollama model (default `qwen3-coder:30b`, or `MAKE_PPT_MODEL`) |
-| `-n, --slides` | auto | target number of slides (default 10) |
+| `-n, --slides` | 10 | target number of slides; `0` lets the model decide |
+| `--at-least` | off | treat `-n` as a minimum: the model may write more |
 | `-i, --instructions` | auto | extra guidance, e.g. `"audience: students, keep it simple"` |
 | `-o, --out` | auto, build | output `.pptx` path |
 | `--vision MODEL` | auto, extract | vision model for pictures (default: best installed) |
@@ -374,14 +377,20 @@ Yes, with an offline model (the default), once installed:
 |---|---|---|
 | `qwen3-coder:30b` | ~17 GB | best structure and content; needs ~16 GB free RAM + VRAM |
 | `phi4` | ~8.4 GB | mid-size option |
-| `qwen3:8b` | ~5 GB | fits most machines; decent in Hindi; slower (thinks first) |
+| `qwen3:8b` | ~5 GB | fits most machines; decent in Hindi |
 | `llama3.2` | ~2 GB | fast, simple decks |
+
+Thinking models (`qwen3`, `deepseek-r1`, `gpt-oss`) get 8k extra reply tokens for their hidden
+reasoning, and gpt-oss thinks *low*; before, the reasoning used up the reply and the spec came
+back empty or cut off.
 
 Bigger models pick better content; the renderer keeps the look consistent either way.
 If a model doesn't fit, Ollama's error ("model requires more system memory…") is shown
 with a hint — close heavy apps or pick a smaller model.
 
-The context window is sized to your document, so short documents use less memory.
+The context window is sized to your document (counted pessimistically, since number-heavy
+tables cost many tokens), so short documents use less memory. Very long sources are cut to what
+fits a 32k window; a warning in *Details* says so.
 
 ## Configuration
 
@@ -402,12 +411,12 @@ The context window is sized to your document, so short documents use less memory
 | `LibreOffice not found` | install it, or set `SOFFICE_PATH`; decks still build, just without previews |
 | Scanned PDF gives no text | install Tesseract, or set `TESSERACT_PATH` |
 | `Cannot write … is it open in PowerPoint?` | close the deck in PowerPoint and run again |
-| "deck saved, but previews could not be made" | the deck is fine; close the `preview` folder or any open slide images and press **Rebuild** |
+| "deck saved, but previews could not be made" | the deck is fine; close the `preview` folder or any open slide images and use **Edit slides → Refresh previews** |
 | "… no longer exists: Ollama retired this cloud model" | pick another model; the retired one is hidden from the menus (remove it with `ollama rm <model>`) |
 | "rejected the API key" / "rate limit or quota reached" | check the key or your plan with that provider; re-enter the key via **+ Add online model…** |
 | "… failed (model can't see images); trying the next vision model" | the chosen image model doesn't accept pictures; a local vision model took over |
 | "did not finish within 30 minutes" | the model is too big for free memory (partly on the CPU) — pick a smaller one or fewer slides |
-| Model keeps failing the checks | the last attempt is saved as `spec.json`; fix it and run `build` |
+| "did not write a usable slide spec" | try a non-thinking model (`qwen2.5`, `phi4`), fewer slides, or fix the saved `spec.json` and run `build`. Quality complaints (missing code slide, too many section slides) are retried but no longer fail the run |
 | Content is thin or slightly wrong | use a bigger model, add `-i` instructions, or edit `spec.json` |
 
 ## Limitations

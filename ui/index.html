@@ -164,6 +164,12 @@
   }
   .go:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 18px 38px rgba(58, 107, 245, 0.65), inset 0 1px 0 rgba(255, 255, 255, .45); }
   .go:active:not(:disabled) { transform: translateY(0); }
+  .go.cancel { background: linear-gradient(180deg, #f06a6a, #d64545); box-shadow: 0 14px 30px rgba(214, 69, 69, .5), inset 0 1px 0 rgba(255, 255, 255, .4); }
+  .seg { display: flex; gap: 4px; padding: 4px; margin-top: 8px; border-radius: 14px; background: rgba(30, 40, 60, .12); box-shadow: inset 0 1px 3px rgba(0, 0, 0, .12); }
+  .seg button { flex: 1; padding: 7px 6px; border-radius: 10px; font-size: 12.5px; font-weight: 600; color: #3f4754; }
+  .seg button[aria-checked="true"] { background: linear-gradient(180deg, #fff, var(--pill)); color: var(--ink); box-shadow: 0 3px 8px rgba(15, 20, 30, .2); }
+  .slider-wrap.auto input[type=range] { display: none; }
+  textarea.field { resize: none; font-family: inherit; line-height: 1.45; }
   .go:disabled { cursor: default; color: #6f7886; background: linear-gradient(180deg, #f4f6f9, var(--pill)); box-shadow: 0 10px 22px rgba(15, 20, 30, .22), inset 0 1px 0 #fff; }
 
   /* ---------- right: progress + result on dark ---------- */
@@ -200,6 +206,15 @@
   .step .txt b { display: block; font-size: 15.5px; font-weight: 600; }
   .step .txt span { display: block; font-size: 13px; color: var(--on-dark-soft); margin-top: 3px; max-width: 520px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .step.idle .txt b { color: var(--on-dark-soft); font-weight: 500; }
+  .step .txt { flex: 1; min-width: 0; }
+  .skip {
+    display: none; flex: none; padding: 7px 14px; border-radius: 16px; font-size: 12.5px; color: var(--on-dark-soft);
+    background: var(--dark-pill); border: 1px solid var(--dark-edge); transition: color .2s, border-color .2s;
+  }
+  .skip:hover { color: #fff; border-color: rgba(255, 255, 255, .35); }
+  .running .step:not(.done):not(.skipped) .skip { display: block; }
+  .step.skipped .orb { opacity: .45; }
+  .step.skipped .txt b { text-decoration: line-through; color: var(--on-dark-soft); }
   @keyframes spin { to { transform: rotate(360deg); } }
 
   .result { margin-top: 26px; display: none; flex-direction: column; gap: 14px; min-height: 0; }
@@ -335,6 +350,56 @@
   .schip .v { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 210px; }
   .schip .dot { width: 8px; height: 8px; }
   .schip.warn { box-shadow: 0 0 0 1.5px rgba(242, 177, 74, .9), 0 10px 22px rgba(15, 20, 30, .22); }
+  /* slide editor */
+  [hidden] { display: none !important; }
+  .editor { position: fixed; inset: 0; z-index: 28; display: none; flex-direction: column; background: rgba(9, 11, 15, .97); backdrop-filter: blur(8px); }
+  .editor.show { display: flex; }
+  .ed-head { display: flex; align-items: center; gap: 10px; padding: 18px 24px; border-bottom: 1px solid var(--dark-edge); }
+  .ed-name { flex: 1; min-width: 0; }
+  .ed-name h3 { margin: 0; font: 700 22px var(--font-display); }
+  .ed-name span { display: block; font-size: 12.5px; color: var(--on-dark-soft); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ed-msg { font-size: 12.5px; color: var(--on-dark-soft); max-width: 340px; white-space: pre-line; text-align: right; }
+  .ed-msg.err { color: #ffb4b4; } .ed-msg.ok { color: var(--ok); }
+  .ed-close { color: var(--on-dark-soft); margin-left: 6px; }
+  .ed-close:hover { background: var(--dark-pill); color: #fff; }
+  .ed-main { flex: 1; min-height: 0; display: grid; grid-template-columns: 330px 1fr; }
+  .ed-list-wrap { display: flex; flex-direction: column; min-height: 0; border-right: 1px solid var(--dark-edge); padding: 14px; gap: 12px; }
+  .ed-list { list-style: none; margin: 0; padding: 0 4px 0 0; flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; }
+  .ed-item { display: grid; grid-template-columns: 22px 112px 1fr; grid-template-rows: auto auto; gap: 2px 10px; align-items: center;
+             padding: 8px; border-radius: 14px; border: 1px solid transparent; cursor: pointer; background: var(--dark-pill); }
+  .ed-item:hover { border-color: var(--dark-edge); }
+  .ed-item.sel { border-color: var(--blue-hi); box-shadow: 0 0 0 2px rgba(58, 107, 245, .35); }
+  .ed-item.drag-over { border-top: 3px solid var(--cyan); }
+  .ed-item .no { grid-row: span 2; font: 600 13px var(--font-display); color: var(--on-dark-soft); text-align: center; cursor: grab; }
+  .ed-item .th { grid-row: span 2; width: 112px; height: 63px; border-radius: 8px; object-fit: cover; background: #1b2029; display: grid; place-items: center;
+                 font-size: 11px; color: var(--on-dark-soft); text-transform: uppercase; letter-spacing: .05em; }
+  .ed-item.edited .th { outline: 2px dashed var(--warn); outline-offset: -2px; opacity: .75; }
+  .ed-item .tt { font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; align-self: end; }
+  .ed-item .ops { display: flex; gap: 2px; align-self: start; }
+  .ed-item .ops button { padding: 2px 6px; border-radius: 6px; font-size: 12px; color: var(--on-dark-soft); }
+  .ed-item .ops button:hover { background: rgba(255, 255, 255, .1); color: #fff; }
+  .ed-item .ops .del:hover { background: rgba(255, 107, 107, .18); color: #ffb4b4; }
+  .ed-add { justify-content: center; }
+  .ed-form { overflow-y: auto; padding: 22px 30px 40px; user-select: text; }
+  .ed-form .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px; }
+  .ed-form label { display: block; font-size: 12.5px; font-weight: 600; color: var(--on-dark-soft); margin: 14px 0 6px 2px; }
+  .ed-form input, .ed-form textarea, .ed-form select, .sheet textarea {
+    width: 100%; padding: 10px 13px; border-radius: 12px; border: 1px solid var(--dark-edge); outline: 0; resize: vertical;
+    background: rgba(255, 255, 255, .06); color: var(--on-dark); font: 14px/1.45 var(--font); }
+  .ed-form select option, .sheet select option { color: #111; }
+  .ed-form textarea.mono { font: 13px/1.5 var(--mono); }
+  .ed-form input:focus, .ed-form textarea:focus, .ed-form select:focus { border-color: var(--blue-hi); box-shadow: 0 0 0 3px rgba(58, 107, 245, .3); }
+  .ed-form .help { font-size: 12px; color: var(--on-dark-soft); margin: 4px 2px 0; }
+  .objrow { display: flex; gap: 8px; margin-bottom: 8px; align-items: flex-start; }
+  .objrow > * { flex: 1; }
+  .objrow > .narrow { flex: 0 0 90px; }
+  .objrow > button { flex: none; padding: 9px 10px; border-radius: 10px; color: var(--on-dark-soft); }
+  .objrow > button:hover { background: rgba(255, 107, 107, .18); color: #ffb4b4; }
+  .ed-big { width: 100%; max-width: 560px; border-radius: 12px; box-shadow: 0 16px 40px rgba(0, 0, 0, .5); display: block; margin-bottom: 6px; }
+  .ai-box { margin-top: 26px; padding: 16px; border-radius: 16px; background: rgba(58, 107, 245, .08); border: 1px solid rgba(91, 134, 255, .3); }
+  .ai-box b { font-size: 14px; }
+  .ai-box .m-row { margin-top: 10px; }
+  .editor.working .ed-main { opacity: .6; pointer-events: none; }
   ::-webkit-scrollbar { width: 8px; height: 8px; }
   ::-webkit-scrollbar-thumb { background: rgba(120, 130, 145, .45); border-radius: 8px; }
   @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
@@ -372,19 +437,25 @@
     <div class="row">
       <div class="slider-wrap">
         <div class="slider-top"><span class="label" style="margin:0">Slides</span><output id="n-out">10</output></div>
+        <div class="seg" id="n-mode" role="radiogroup" aria-label="How many slides">
+          <button role="radio" data-mode="auto" title="The model decides how many slides the content needs">Model decides</button>
+          <button role="radio" data-mode="min" title="The model may write more, never fewer">At least</button>
+          <button role="radio" data-mode="exact" title="About this many slides">About</button>
+        </div>
         <input type="range" id="n" min="4" max="20" value="10" aria-label="Number of slides">
       </div>
     </div>
 
     <div>
-      <p class="label"><label for="focus">Focus <span style="font-weight:400;color:#3f4754">(optional)</span></label></p>
-      <input class="soft field" id="focus" placeholder="e.g. audience: management, keep it short" autocomplete="off">
+      <p class="label"><label for="focus">Hints for the model <span style="font-weight:400;color:#3f4754">(optional)</span></label></p>
+      <textarea class="soft field" id="focus" rows="2" placeholder="e.g. audience: management, keep it short, write in Hindi, one slide per bike model"></textarea>
     </div>
 
     <button class="go" id="go" disabled>
       <svg width="19" height="19" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2l2.4 6.6L21 11l-6.6 2.4L12 20l-2.4-6.6L3 11l6.6-2.4z"/></svg>
       <span id="go-txt">Add files to start</span>
     </button>
+    <button class="linkbtn" id="open-old" style="align-self:center;margin:0;color:#1d2a44;font-size:13px">Edit a deck made earlier…</button>
   </div>
   </section>
 
@@ -403,9 +474,9 @@
 
     <ol class="steps" id="steps">
       <li class="step idle" data-stage="read"><span class="orb"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6M8 13h8M8 17h5"/></svg></span><div class="txt"><b>Read the files</b><span>Text, tables, images, OCR for scans</span></div></li>
-      <li class="step idle" data-stage="look"><span class="orb"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg></span><div class="txt"><b>Look at the pictures</b><span>A local vision model describes them</span></div></li>
-      <li class="step idle" data-stage="write"><span class="orb"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg></span><div class="txt"><b>Write the slides</b><span>Your local model plans every slide</span></div></li>
-      <li class="step idle" data-stage="render"><span class="orb"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8M12 17v4"/></svg></span><div class="txt"><b>Build the deck</b><span>Design, animations, previews</span></div></li>
+      <li class="step idle" data-stage="look"><span class="orb"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg></span><div class="txt"><b>Look at the pictures</b><span>A local vision model describes them</span></div><button class="skip" data-skip="look" title="Stop describing pictures and go on without (the rest of) the descriptions">Skip</button></li>
+      <li class="step idle" data-stage="write"><span class="orb"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg></span><div class="txt"><b>Write the slides</b><span>Your local model plans every slide</span></div><button class="skip" data-skip="write" title="Stop retrying and use the best slide plan so far">Skip</button></li>
+      <li class="step idle" data-stage="render"><span class="orb"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8M12 17v4"/></svg></span><div class="txt"><b>Build the deck</b><span>Design, animations, previews</span></div><button class="skip" data-skip="preview" title="Save the deck without making slide previews">Skip</button></li>
     </ol>
 
     <div class="error" id="error" role="alert"></div>
@@ -416,8 +487,7 @@
         <div class="btns">
           <button class="btn primary" id="b-open">Open deck</button>
           <button class="btn ghost" id="b-folder">Folder</button>
-          <button class="btn ghost" id="b-edit" title="Edit the slide content, then Rebuild">Edit spec</button>
-          <button class="btn light" id="b-rebuild">Rebuild</button>
+          <button class="btn light" id="b-edit" title="Reorder, add, remove or change slides, then export a new deck">Edit slides</button>
         </div>
       </div>
       <div class="stamp"><span class="dot"></span><span id="r-stamp"></span></div>
@@ -514,6 +584,41 @@
     <div class="m-actions">
       <button class="btn ghost" id="m-cancel">Cancel</button>
       <button class="btn primary" id="m-save">Save &amp; use</button>
+    </div>
+  </div>
+</div>
+
+<div class="editor" id="editor" role="dialog" aria-modal="true" aria-labelledby="ed-title">
+  <header class="ed-head">
+    <div class="ed-name"><h3 id="ed-title">Edit slides</h3><span id="ed-sub"></span></div>
+    <span class="ed-msg" id="ed-msg" role="status"></span>
+    <button class="btn ghost" id="ed-stop" hidden>Stop</button>
+    <button class="btn ghost" id="ed-preview" title="Rebuild the slide pictures from your edits">Refresh previews</button>
+    <button class="btn primary" id="ed-export">Export PPT…</button>
+    <button class="x big ed-close" id="ed-close" aria-label="Close the editor">✕</button>
+  </header>
+  <div class="ed-main">
+    <aside class="ed-list-wrap">
+      <ol class="ed-list" id="ed-list" aria-label="Slides (drag to reorder)"></ol>
+      <button class="btn ghost ed-add" id="ed-add">+ Add slide after the selected one</button>
+    </aside>
+    <section class="ed-form" id="ed-form" aria-label="Selected slide"></section>
+  </div>
+</div>
+
+<div class="modal" id="add-modal" role="dialog" aria-modal="true" aria-labelledby="add-title">
+  <div class="sheet">
+    <h3 id="add-title">Add a slide</h3>
+    <p class="m-sub" id="add-sub"></p>
+    <label for="add-type">Slide type</label>
+    <select id="add-type"></select>
+    <label for="add-ai">What should it say? <span style="font-weight:400">(for "Write with AI")</span></label>
+    <input id="add-ai" autocomplete="off" placeholder="e.g. a comparison table of the three cheapest models">
+    <p class="m-msg" id="add-msg"></p>
+    <div class="m-actions">
+      <button class="btn ghost" id="add-cancel">Cancel</button>
+      <button class="btn ghost" id="add-blank">Add blank slide</button>
+      <button class="btn primary" id="add-ai-go">Write with AI</button>
     </div>
   </div>
 </div>
@@ -858,22 +963,39 @@ setOutdir("", false);
 
 /* ---------- controls ---------- */
 const slider = $("n");
-function paintSlider() { slider.style.setProperty("--p", ((slider.value - slider.min) / (slider.max - slider.min) * 100) + "%"); $("n-out").textContent = slider.value; }
-slider.oninput = paintSlider; paintSlider();
+function paintSlider() {
+  slider.style.setProperty("--p", ((slider.value - slider.min) / (slider.max - slider.min) * 100) + "%");
+  $("n-out").textContent = state.slideMode === "auto" ? "Auto" : state.slideMode === "min" ? `${slider.value} or more` : slider.value;
+}
+function setSlideMode(mode) {
+  state.slideMode = mode;
+  for (const b of $("n-mode").children) b.setAttribute("aria-checked", b.dataset.mode === mode);
+  slider.closest(".slider-wrap").classList.toggle("auto", mode === "auto");
+  try { localStorage.setItem("slideMode", mode); } catch {}
+  paintSlider(); updateGo();
+}
+for (const b of $("n-mode").children) b.onclick = () => setSlideMode(b.dataset.mode);
+slider.oninput = paintSlider;
+let savedMode = "exact"; try { savedMode = localStorage.getItem("slideMode") || "exact"; } catch {}
 for (const id of ["t-anim"]) $(id).onclick = e => { e.preventDefault(); const t = $(id); t.setAttribute("aria-checked", t.getAttribute("aria-checked") !== "true"); updateSummary(); };
 const on = id => $(id).getAttribute("aria-checked") === "true";
 
 function updateGo() {
   const ready = state.files.length && state.model && !state.busy;
-  $("go").disabled = !ready;
-  $("go-txt").textContent = state.busy ? "Working…" : !state.files.length ? "Add files to start"
-                          : `Generate ${slider.value}-slide deck`;
+  $("go").disabled = !ready && !state.busy;
+  $("go").classList.toggle("cancel", state.busy);
+  $("steps").classList.toggle("running", state.busy);
+  $("go-txt").textContent = state.busy ? "Cancel" : !state.files.length ? "Add files to start"
+                          : state.slideMode === "auto" ? "Generate deck"
+                          : state.slideMode === "min" ? `Generate deck · ${slider.value}+ slides` : `Generate ${slider.value}-slide deck`;
 }
 slider.addEventListener("input", updateGo);
+setSlideMode(savedMode);
 
 $("go").onclick = async () => {
+  if (state.busy) { $("go-txt").textContent = "Cancelling…"; return pywebview.api.cancel(); }
   resetRun("Building your deck");
-  await pywebview.api.generate({ files: state.files, model: state.model, slides: +slider.value,
+  await pywebview.api.generate({ files: state.files, model: state.model, slides: +slider.value, slide_mode: state.slideMode,
                                  focus: $("focus").value, animate: on("t-anim"), vision: state.visionModel ?? "auto", design: state.design || "",
                                  outdir: state.outdir });
 };
@@ -884,6 +1006,7 @@ function resetRun(headline) {
   $("headline").textContent = headline; $("subline").textContent = "This can take a few minutes with bigger models.";
   $("error").classList.remove("show"); $("result").classList.remove("show"); $("log").replaceChildren();
   for (const s of $("steps").children) s.className = "step idle";
+  state.skipped = new Set();
   state.t0 = Date.now();
   clearInterval(state.timer);
   state.timer = setInterval(() => {
@@ -895,7 +1018,7 @@ function resetRun(headline) {
 function setStage(stage, detail) {
   const idx = ORDER.indexOf(stage);
   [...$("steps").children].forEach((s, i) => {
-    s.className = "step " + (i < idx ? "done" : i === idx ? "active" : "idle");
+    s.className = "step " + (i < idx ? "done" : i === idx ? "active" : "idle") + (state.skipped?.has(s.dataset.stage) ? " skipped" : "");
     if (i === idx && detail) s.querySelector(".txt span").textContent =
       /^deck:/i.test(detail) ? "Saving the deck and rendering previews" : detail;
   });
@@ -916,7 +1039,7 @@ window.onEvent = ev => {
   else if (ev.type === "stage") setStage(ev.stage, ev.detail);
   else if (ev.type === "done") {
     state.busy = false; state.last = ev; updateGo();
-    for (const s of $("steps").children) s.className = "step done";
+    for (const s of $("steps").children) s.className = "step done" + (state.skipped.has(s.dataset.stage) ? " skipped" : "");
     $("headline").textContent = "Your deck is ready";
     $("subline").textContent = `Finished in ${Math.floor(ev.seconds / 60)}:${String(ev.seconds % 60).padStart(2, "0")}.`;
     $("r-name").textContent = ev.name; $("r-meta").textContent = `${ev.thumbs.length} slides · in ${ev.folder.split(/[\\/]/).pop()}`; $("r-meta").title = ev.folder;
@@ -927,6 +1050,11 @@ window.onEvent = ev => {
       return im;
     }));
     $("result").classList.add("show");
+  } else if (ev.type === "cancelled") {
+    state.busy = false; updateGo();
+    for (const s of $("steps").children) if (!s.classList.contains("done")) s.className = "step idle";
+    $("headline").textContent = "Cancelled";
+    $("subline").textContent = "Stopped. No deck was made this time.";
   } else if (ev.type === "error") {
     state.busy = false; updateGo();
     const active = document.querySelector(".step.active"); if (active) active.className = "step idle";
@@ -936,10 +1064,243 @@ window.onEvent = ev => {
   }
 };
 
+for (const b of document.querySelectorAll(".skip")) b.onclick = () => {
+  const step = b.closest(".step");
+  state.skipped.add(step.dataset.stage); step.classList.add("skipped");
+  logLine(`Skipping: ${step.querySelector("b").textContent}`, "warning");
+  pywebview.api.skip(b.dataset.skip);
+};
 $("b-open").onclick = () => pywebview.api.open_path(state.last.deck);
 $("b-folder").onclick = () => pywebview.api.open_path(state.last.folder);
-$("b-edit").onclick = () => pywebview.api.edit_spec(state.last.spec);
-$("b-rebuild").onclick = async () => { const spec = state.last.spec; resetRun("Rebuilding from your edits"); await pywebview.api.rebuild(spec); };
+$("b-edit").onclick = () => openEditor(state.last.spec);
+$("open-old").onclick = async () => { const p = await pywebview.api.pick_spec(); if (p) openEditor(p); };
+
+/* ---------- slide editor ---------- */
+const TYPES = { title: "Title", section: "Section divider", bullets: "Bullet points", cards: "Cards", steps: "Steps",
+  stats: "Big numbers", table: "Table", chart: "Chart", code: "Code / commands", image: "Picture", closing: "Closing" };
+const FIELDS = {  // [key, kind, label, extra]
+  title: [["subtitle", "text", "Subtitle"], ["footer", "text", "Small footer text (optional)"]],
+  section: [["subtitle", "text", "Subtitle (optional)"]],
+  bullets: [["bullets", "lines", "Bullet points — one per line; “Label: detail” makes the label bold"],
+            ["image", "image", "Picture (optional)"], ["callout", "text", "Highlighted tip (optional)"]],
+  cards: [["cards", "objs", "Cards", [["icon", "Icon (1–2 chars)", 1], ["title", "Title"], ["text", "Text"]]]],
+  steps: [["steps", "objs", "Steps", [["title", "Title"], ["text", "Text"]]]],
+  stats: [["stats", "objs", "Numbers", [["value", "Value", 1], ["label", "Label"]]], ["text", "text", "Text under the numbers (optional)"]],
+  table: [["header", "cells", "Column headings — separate with |"], ["rows", "grid", "Rows — one per line, cells separated with |"]],
+  chart: [["chart", "choice", "Chart type", ["column", "bar", "line", "pie"]], ["categories", "cells", "Categories — separate with |"],
+          ["series", "series", "Data — one series per line, e.g.  Sales: 10, 20, 30"], ["text", "text", "Comment beside the chart (optional)"]],
+  code: [["code", "code", "Code / commands"], ["lang", "text", "Language (e.g. bash, powershell)"], ["note", "text", "Warning note (optional)"]],
+  image: [["image", "image", "Picture"], ["caption", "text", "Caption (optional)"], ["bullets", "lines", "Bullet points (optional, one per line)"]],
+  closing: [["items", "lines", "Key takeaways — one per line"]],
+};
+const BLANK = { bullets: { bullets: ["New point"] }, cards: { cards: [{ title: "Card", text: "" }] }, steps: { steps: [{ title: "Step", text: "" }] },
+  stats: { stats: [{ value: "0", label: "Label" }] }, table: { header: ["Column 1", "Column 2"], rows: [["", ""]] },
+  chart: { chart: "column", categories: ["A", "B"], series: [{ name: "Series", values: [1, 2] }] }, code: { code: "# command" },
+  closing: { items: ["Key takeaway"] } };
+let ed = null;
+const plain = () => JSON.parse(JSON.stringify(ed.spec, (k, v) => k.startsWith("_") ? undefined : v));
+function edMsg(text, kind) { $("ed-msg").textContent = text; $("ed-msg").className = "ed-msg" + (kind ? " " + kind : ""); }
+function edBusy(text) {
+  $("editor").classList.toggle("working", !!text);
+  for (const id of ["ed-preview", "ed-export", "ed-add"]) $(id).disabled = !!text;
+  $("ed-stop").hidden = !text;
+  if (text) edMsg(text);
+}
+async function openEditor(path) {
+  const r = await pywebview.api.load_spec(path);
+  if (r.error) return showError(r.error);
+  ed = { path, spec: r.spec, sel: 0, deck: r.deck };
+  ed.spec.slides.forEach((s, i) => s._thumb = r.thumbs[i] || "");
+  $("ed-sub").textContent = (r.deck ? r.deck.split(/[\\/]/).pop() : path) + " · edits are kept between sessions; Export makes a new PPT";
+  $("ed-sub").title = path;
+  edMsg(""); edBusy(""); renderList(); renderForm();
+  $("editor").classList.add("show");
+}
+async function closeEditor() {
+  if (ed) await pywebview.api.save_spec(ed.path, plain());  // keep the edits even without exporting
+  $("editor").classList.remove("show"); ed = null;
+}
+function buildItem(i) {
+  const s = ed.spec.slides[i], li = document.createElement("li");
+  li.className = "ed-item" + (i === ed.sel ? " sel" : "") + (s._edited ? " edited" : "");
+  li.draggable = true;
+  li.innerHTML = `<span class="no" title="Drag to move"></span>${s._thumb ? '<img class="th" alt="">' : '<span class="th"></span>'}
+    <span class="tt"></span><span class="ops"><button title="Move up" aria-label="Move up">↑</button><button title="Move down" aria-label="Move down">↓</button>
+    <button class="del" title="Remove this slide" aria-label="Remove">✕</button></span>`;
+  li.querySelector(".no").textContent = i + 1;
+  if (s._thumb) li.querySelector("img").src = s._thumb; else li.querySelector(".th").textContent = TYPES[s.type] || s.type;
+  li.querySelector(".tt").textContent = s.title || "(no title)";
+  li.title = s._edited ? "Changed — Refresh previews to see it" : "";
+  const [up, down, del] = li.querySelectorAll(".ops button");
+  up.onclick = e => { e.stopPropagation(); moveSlide(i, i - 1); };
+  down.onclick = e => { e.stopPropagation(); moveSlide(i, i + 1); };
+  del.onclick = e => {
+    e.stopPropagation();
+    if (ed.spec.slides.length === 1) return edMsg("A deck needs at least one slide.", "err");
+    if (!confirm(`Remove slide ${i + 1} “${s.title || TYPES[s.type]}”?`)) return;
+    ed.spec.slides.splice(i, 1); ed.sel = Math.min(ed.sel, ed.spec.slides.length - 1);
+    edMsg(`Slide ${i + 1} removed — Export to make the new PPT.`); renderList(); renderForm();
+  };
+  li.onclick = () => { ed.sel = i; renderList(); renderForm(); };
+  li.ondragstart = e => { ed.drag = i; e.dataTransfer.effectAllowed = "move"; };
+  li.ondragover = e => { e.preventDefault(); e.stopPropagation(); li.classList.add("drag-over"); };
+  li.ondragleave = () => li.classList.remove("drag-over");
+  li.ondrop = e => { e.preventDefault(); e.stopPropagation(); li.classList.remove("drag-over");
+                     if (ed.drag != null && ed.drag !== i) moveSlide(ed.drag, ed.drag < i ? i - 1 : i); ed.drag = null; };
+  return li;
+}
+function renderList() { $("ed-list").replaceChildren(...ed.spec.slides.map((_, i) => buildItem(i))); }
+function updateItem(i) { const old = $("ed-list").children[i]; if (old) old.replaceWith(buildItem(i)); }
+function moveSlide(from, to) {
+  const list = ed.spec.slides;
+  if (to < 0 || to >= list.length) return;
+  list.splice(to, 0, list.splice(from, 1)[0]);
+  ed.sel = to; renderList(); renderForm();
+  $("ed-list").children[to].scrollIntoView({ block: "nearest" });
+}
+function changed() { const s = ed.spec.slides[ed.sel]; s._edited = true; updateItem(ed.sel); }
+const splitCells = t => t.split("|").map(x => x.trim());
+function input(value, onInput, opts = {}) {
+  const el = document.createElement(opts.area ? "textarea" : "input");
+  if (opts.area) el.rows = opts.rows || 4;
+  if (opts.mono) el.className = "mono";
+  if (opts.ph) el.placeholder = opts.ph;
+  el.value = value ?? "";
+  el.oninput = () => { onInput(el.value); changed(); };
+  return el;
+}
+function field(label, ...els) {
+  const d = document.createElement("div"), l = document.createElement("label");
+  l.textContent = label; d.append(l, ...els); return d;
+}
+function objsEditor(s, key, cols) {
+  const wrap = document.createElement("div");
+  const draw = () => {
+    s[key] = s[key] || [];
+    wrap.replaceChildren(...s[key].map((o, j) => {
+      const row = document.createElement("div"); row.className = "objrow";
+      for (const [k, ph, narrow] of cols) {
+        const el = input(o[k], v => o[k] = v, { ph }); if (narrow) el.className = "narrow"; row.append(el);
+      }
+      const x = document.createElement("button"); x.textContent = "✕"; x.title = "Remove";
+      x.onclick = () => { s[key].splice(j, 1); changed(); draw(); };
+      row.append(x); return row;
+    }));
+    const add = document.createElement("button"); add.className = "linkbtn"; add.textContent = "+ Add";
+    add.onclick = () => { s[key].push({}); changed(); draw(); };
+    wrap.append(add);
+  };
+  draw(); return wrap;
+}
+function renderForm() {
+  const s = ed.spec.slides[ed.sel], f = $("ed-form");
+  f.replaceChildren();
+  if (s._thumb) {
+    const im = new Image(); im.className = "ed-big"; im.src = s._thumb; im.alt = `Slide ${ed.sel + 1}`; f.append(im);
+    if (s._edited) { const h = document.createElement("p"); h.className = "help"; h.textContent = "Picture shows the slide before your changes — Refresh previews to update it."; f.append(h); }
+  }
+  const type = document.createElement("select");
+  for (const [k, v] of Object.entries(TYPES)) type.append(new Option(v, k));
+  type.value = s.type;
+  type.onchange = () => { s.type = type.value; Object.entries(BLANK[s.type] || {}).forEach(([k, v]) => { if (!s[k]) s[k] = structuredClone(v); }); changed(); renderForm(); };
+  const top = document.createElement("div"); top.className = "grid2";
+  top.append(field("Slide type", type), field("Small label above the title (optional)", input(s.kicker, v => s.kicker = v)));
+  f.append(top, field("Title", input(s.title, v => { s.title = v; })));
+  for (const [key, kind, label, extra] of FIELDS[s.type] || []) {
+    let el;
+    if (kind === "text") el = input(s[key], v => s[key] = v);
+    else if (kind === "lines") el = input((s[key] || []).join("\n"), v => s[key] = v.split("\n").filter(x => x.trim()), { area: true, rows: 6 });
+    else if (kind === "code") el = input(s[key], v => s[key] = v, { area: true, rows: 10, mono: true });
+    else if (kind === "cells") el = input((s[key] || []).join(" | "), v => s[key] = splitCells(v));
+    else if (kind === "grid") el = input((s[key] || []).map(r => r.join(" | ")).join("\n"),
+                                         v => s[key] = v.split("\n").filter(x => x.trim()).map(splitCells), { area: true, rows: 8, mono: true });
+    else if (kind === "series") el = input((s[key] || []).map(x => `${x.name}: ${(x.values || []).join(", ")}`).join("\n"), v => s[key] =
+        v.split("\n").filter(x => x.trim()).map(l => { const [n, vals = ""] = l.split(/:(.*)/); return { name: n.trim(), values: vals.split(",").map(x => parseFloat(x)).filter(x => !isNaN(x)) }; }),
+        { area: true, rows: 4, mono: true });
+    else if (kind === "choice") { el = document.createElement("select"); for (const c of extra) el.append(new Option(c, c)); el.value = s[key] || extra[0]; el.onchange = () => { s[key] = el.value; changed(); }; }
+    else if (kind === "objs") el = objsEditor(s, key, extra);
+    else if (kind === "image") {
+      el = document.createElement("div"); el.className = "m-row";
+      const path = input(s[key], v => s[key] = v, { ph: "assets/picture.png" });
+      const pick = document.createElement("button"); pick.className = "btn ghost"; pick.textContent = "Choose picture…";
+      pick.onclick = async () => { const p = await pywebview.api.pick_image(ed.path); if (p) { s[key] = path.value = p; changed(); } };
+      el.append(path, pick);
+    }
+    f.append(field(label, el));
+  }
+  f.append(field("Speaker notes", input(s.notes, v => s.notes = v, { area: true, rows: 3 })));
+  const ai = document.createElement("div"); ai.className = "ai-box";
+  const m = state.models.find(x => x.name === state.model);
+  ai.innerHTML = `<b>Rewrite this slide with AI</b><p class="help"></p><div class="m-row"></div>`;
+  ai.querySelector(".help").textContent = `Uses ${m ? m.label : "the selected model"} and the original documents. Only this slide changes.`;
+  const instr = input("", () => {}, { ph: "e.g. shorter, as a table, add the prices, in Hindi" });
+  instr.oninput = null;
+  const go = document.createElement("button"); go.className = "btn primary"; go.textContent = "Rewrite";
+  go.onclick = () => aiSlide(instr.value, false);
+  ai.querySelector(".m-row").append(instr, go);
+  f.append(ai);
+}
+async function aiSlide(instruction, insert) {
+  if (!state.model) return edMsg("Choose a model in Settings first.", "err");
+  const at = ed.sel;
+  edBusy(insert ? `Writing a new slide after slide ${at + 1}…` : `Rewriting slide ${at + 1}… (Stop cancels)`);
+  const r = await pywebview.api.ai_slide(ed.path, plain(), at, instruction, insert, state.model);
+  edBusy("");
+  if (!ed) return;
+  if (r.error) return edMsg(r.error, "err");
+  r.slide._edited = true;
+  if (insert) { ed.spec.slides.splice(at + 1, 0, r.slide); ed.sel = at + 1; }
+  else { r.slide._thumb = ed.spec.slides[at]._thumb; ed.spec.slides[at] = r.slide; }
+  edMsg(insert ? `New slide ${at + 2} added.` : `Slide ${at + 1} rewritten.`, "ok");
+  renderList(); renderForm();
+}
+function applyThumbs(thumbs) { ed.spec.slides.forEach((s, i) => { s._thumb = thumbs[i] || ""; delete s._edited; }); renderList(); renderForm(); }
+$("ed-close").onclick = closeEditor;
+$("ed-stop").onclick = () => pywebview.api.cancel();
+$("ed-preview").onclick = async () => {
+  edBusy("Building previews…");
+  const r = await pywebview.api.preview_spec(ed.path, plain());
+  edBusy("");
+  if (r.error) return edMsg(r.error, "err");
+  applyThumbs(r.thumbs); edMsg("Previews updated.", "ok");
+};
+$("ed-export").onclick = async () => {
+  const base = ed.deck ? ed.deck.split(/[\\/]/).pop().replace(/( \(edited( \d+)?\))?\.pptx$/i, "") : "deck";
+  edBusy("Exporting…");
+  const r = await pywebview.api.export_deck(ed.path, plain(), `${base} (edited).pptx`);
+  edBusy("");
+  if (r.error) return edMsg(r.error, "err");
+  if (!r.deck) return edMsg("");
+  ed.deck = r.deck; applyThumbs(r.thumbs);
+  edMsg(`Saved ${r.name}`, "ok");
+  state.last = { ...(state.last || {}), deck: r.deck, folder: r.folder, name: r.name, spec: ed.path };
+  $("r-name").textContent = r.name; $("r-meta").textContent = `${r.all_thumbs.length} slides · in ${r.folder.split(/[\\/]/).pop()}`;
+  $("thumbs").replaceChildren(...r.all_thumbs.map((src, i) => { const im = new Image(); im.src = src; im.alt = `Slide ${i + 1}`;
+    im.onclick = () => { $("lightbox-img").src = src; $("lightbox").classList.add("show"); }; return im; }));
+  $("result").classList.add("show"); $("headline").textContent = "Your edited deck is ready";
+};
+$("ed-add").onclick = () => {
+  $("add-type").replaceChildren(new Option("Let the AI choose", ""), ...Object.entries(TYPES).map(([k, v]) => new Option(v, k)));
+  $("add-sub").textContent = `It goes after slide ${ed.sel + 1} “${ed.spec.slides[ed.sel].title || ""}”.`;
+  $("add-ai").value = ""; $("add-msg").textContent = "";
+  $("add-modal").classList.add("show"); $("add-ai").focus();
+};
+const closeAdd = () => $("add-modal").classList.remove("show");
+$("add-cancel").onclick = closeAdd;
+$("add-modal").onclick = e => { if (e.target === $("add-modal")) closeAdd(); };
+$("add-blank").onclick = () => {
+  const type = $("add-type").value || "bullets";
+  const s = { type, title: "New slide", ...structuredClone(BLANK[type] || {}), _edited: true };
+  ed.spec.slides.splice(ed.sel + 1, 0, s); ed.sel += 1;
+  closeAdd(); renderList(); renderForm(); edMsg(`Slide ${ed.sel + 1} added — fill it in on the right.`, "ok");
+  $("ed-list").children[ed.sel].scrollIntoView({ block: "nearest" });
+};
+$("add-ai-go").onclick = () => {
+  const type = $("add-type").value, text = $("add-ai").value.trim();
+  if (!text && !type) { $("add-msg").textContent = "Say what the slide should cover, or pick a type."; return; }
+  closeAdd();
+  aiSlide([text, type ? `Make it a "${type}" slide.` : ""].filter(Boolean).join(" "), true);
+};
 $("lightbox").onclick = () => $("lightbox").classList.remove("show");
 document.addEventListener("keydown", e => { if (e.key === "Escape") { $("lightbox").classList.remove("show"); $("select").classList.remove("open"); $("vselect").classList.remove("open"); closeModal(); closeSettings(); } });
 

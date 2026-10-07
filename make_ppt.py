@@ -31,6 +31,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -64,6 +65,48 @@ MIN_IMAGE_BYTES = 8_000      # skip icons and spacer images in documents
 
 logging.getLogger("pdfminer").setLevel(logging.ERROR)  # FontBBox noise from pdfplumber
 log = logging.getLogger("make_ppt")
+
+
+# ---------------------------------------------------------------- cancel / skip
+# The app sets these from the UI thread while a run is going; the CLI never touches them.
+
+class Cancelled(Exception):
+    """The user pressed Cancel."""
+
+
+class Skipped(Exception):
+    """The user skipped the stage that was running."""
+
+
+STOP = threading.Event()   # cancel the whole run
+SKIP: set[str] = set()     # stages to skip: "look" (describe pictures), "write" (stop retrying), "preview"
+
+
+def checkpoint() -> None:
+    if STOP.is_set():
+        raise Cancelled("Cancelled.")
+
+
+def interruptible(fn, stage: str | None = None):
+    """Run a slow call (model reply, OCR, previews) on a helper thread so Cancel / Skip
+    take effect at once instead of when the call returns."""
+    box = {}
+
+    def run():
+        try:
+            box["value"] = fn()
+        except BaseException as e:  # SystemExit too: re-raised on the caller's thread
+            box["error"] = e
+    t = threading.Thread(target=run, daemon=True)
+    t.start()
+    while t.is_alive():
+        t.join(0.25)
+        checkpoint()
+        if stage in SKIP:
+            raise Skipped(stage)
+    if "error" in box:
+        raise box["error"]
+    return box["value"]
 
 
 # ---------------------------------------------------------------- extraction
@@ -145,6 +188,7 @@ def extract_pdf(path: Path, assets: Path) -> str:
     reader = pypdf.PdfReader(path)
     with pdfplumber.open(path) as pdf:
         for i, page in enumerate(pdf.pages):
+            checkpoint()
             text = (page.extract_text() or "").strip()
             label = f"## Page {i + 1}"
             scanned = len(text) < 20  # no text layer
@@ -294,18 +338,27 @@ NO_SIGHT = re.compile(
     r"(the |any |this )?(image|picture|photo)|\bas a text-based\b|\bno image (was|is) (provided|attached)", re.I)
 
 
+_CAPS: dict[str, list | None] = {}
+
+
+def model_caps(name: str) -> list | None:
+    """What an Ollama model can do ('vision', 'thinking', ...), or None if Ollama doesn't say."""
+    if name not in _CAPS:
+        try:
+            req = urllib.request.Request(f"{OLLAMA}/api/show", json.dumps({"model": name}).encode(),
+                                         {"Content-Type": "application/json"})
+            with urllib.request.urlopen(req, timeout=5) as r:
+                _CAPS[name] = json.loads(r.read()).get("capabilities")
+        except (urllib.error.URLError, OSError, ValueError):
+            return None
+    return _CAPS[name]
+
+
 def vision_capable(name: str) -> bool:
     """Ask Ollama whether a model accepts images (newer Ollama reports 'capabilities');
     fall back to well-known vision model names."""
-    try:
-        req = urllib.request.Request(f"{OLLAMA}/api/show", json.dumps({"model": name}).encode(),
-                                     {"Content-Type": "application/json"})
-        with urllib.request.urlopen(req, timeout=5) as r:
-            caps = json.loads(r.read()).get("capabilities")
-        if caps is not None:
-            return "vision" in caps
-    except (urllib.error.URLError, OSError, ValueError):
-        pass
+    if (caps := model_caps(name)) is not None:
+        return "vision" in caps
     base = name.split(":")[0].lower()
     return base in VISION_PREFS or "vision" in base or base.endswith("vl")
 
@@ -339,13 +392,10 @@ def describe_image(model: str, path: Path) -> str:
         import providers
         text = providers.describe_image(model, b64, VISION_PROMPT, 400, 300)
     else:
-        body = json.dumps({
-            "model": model, "stream": False, "keep_alive": 0,  # free memory for the slide model
-            "prompt": VISION_PROMPT, "images": [b64],
-            "options": {"temperature": 0.2, "num_ctx": 4096, "num_predict": 400}}).encode()
-        req = urllib.request.Request(f"{OLLAMA}/api/generate", body, {"Content-Type": "application/json"})
-        with urllib.request.urlopen(req, timeout=600) as r:
-            text = json.loads(r.read()).get("response", "").strip()
+        text = ollama_stream("/api/generate", {
+            "model": model, "keep_alive": 0,  # free memory for the slide model
+            "prompt": VISION_PROMPT, "images": [b64], **think_option(model),
+            "options": {"temperature": 0.2, "num_ctx": 4096, "num_predict": 400}}, 600, "look")[0].strip()
     if NO_SIGHT.search(text[:300]):  # text-only models may answer instead of erroring
         raise ValueError("model can't see images")
     return text
@@ -366,11 +416,16 @@ def add_image_descriptions(md: str, assets: Path, preferred: str | None) -> str:
         log.warning("image model %s is online - the pictures will be sent to it", model_label(models[0]))
     descriptions = {}
     for name in names:
+        if "look" in SKIP:
+            log.info("skipped describing the remaining pictures")
+            break
         while models:
             try:
                 log.info("describing %s with %s", name, models[0])
-                descriptions[name] = describe_image(models[0], assets / name)
+                descriptions[name] = interruptible(lambda: describe_image(models[0], assets / name), "look")
                 VISION_USED.add(models[0])
+                break
+            except Skipped:
                 break
             except (urllib.error.HTTPError, ValueError) as e:  # memory, no image support, bad key...
                 reason = e.code if isinstance(e, urllib.error.HTTPError) else e
@@ -390,6 +445,7 @@ def extract_all(files: list[Path], workdir: Path, vision: str | None = "auto") -
         sys.exit("File not found: " + ", ".join(missing))
     chunks = []
     for f in files:
+        checkpoint()
         log.info("extracting %s", f.name)
         chunks.append(f"# Source: {f.name}\n\n{extract(f, workdir / 'assets')}")
     text = "\n\n".join(chunks)
@@ -965,7 +1021,9 @@ class Deck(FamilyLayouts):
                       anchor=MSO_ANCHOR.MIDDLE, min_size=13)
 
     def build(self, out: Path, animate: bool = True) -> Path:
+        self.slide_map = []  # spec slide -> its first deck slide (long slides continue onto more)
         for s in self.spec["slides"]:
+            self.slide_map.append(len(self.prs.slides))
             getattr(self, "s_" + s["type"])(s)
         if animate and self.spec.get("animate", True):
             for slide, marks, skip in self.anim:
@@ -1115,12 +1173,16 @@ def build(spec_path: Path, out: Path | None, preview: bool = True, animate: bool
     out = out or base / f"{safe_name(spec.get('title') or spec_path.stem)}.pptx"
     deck = Deck(spec, base)
     deck.build(out, animate)
+    (base / "slide_map.json").write_text(json.dumps(deck.slide_map), encoding="utf-8")
     print(f"Deck: {out} ({deck.slide_no} slides)")
     for w in deck.warnings:
         print(f"  warning: {w}")
-    if preview:
+    if preview and "preview" not in SKIP:
         try:
-            pngs = render_previews(out, base / "preview")
+            pngs = interruptible(lambda: render_previews(out, base / "preview"), "preview")
+        except Skipped:
+            log.info("skipped the slide previews")
+            pngs = []
         except (OSError, subprocess.SubprocessError) as e:  # previews are a convenience, the deck is done
             log.warning("deck saved, but previews could not be made (%s) - close the preview folder or "
                         "any open slide images and rebuild to get them", e)
@@ -1142,9 +1204,10 @@ Reply with ONLY a JSON object in this format:
 {schema}
 
 Rules:
-- About {slides} slides. Start with a "title" slide, end with a "closing" slide.
+- {count} Start with a "title" slide, end with a "closing" slide.
 - Use at most one "section" slide per 5 slides, and none in decks under 10 slides.
 - Vary slide types. Prefer cards, steps, stats, tables and charts over plain bullets.
+- Keep the whole reply short: tables at most 8 rows, never copy a long table whole.
 - Max 6 bullets per slide, max 20 words each. A bullet may start with a short bold label and a colon, e.g. "Budget: 12 lakh".
 - Put the detail that does not fit on the slide into "notes".
 - Use only facts from the source. Do not invent numbers.
@@ -1197,31 +1260,80 @@ def ask_llm(model: str, prompt: str) -> str:
     if model.startswith("api:"):
         import providers
         try:
-            return providers.chat_json(model, prompt, MAX_REPLY_TOKENS, REPLY_TIMEOUT)
+            return interruptible(lambda: providers.chat_json(model, prompt, MAX_REPLY_TOKENS, REPLY_TIMEOUT), "write")
         except ValueError as e:
             sys.exit(str(e))
-    return ask_ollama(model, prompt)
+    return interruptible(lambda: ask_ollama(model, prompt), "write")
 
 
 MAX_REPLY_TOKENS = 6144   # a 20-slide spec is ~4k tokens
+THINK_TOKENS = 6144       # extra room for a thinking model's reasoning
+MAX_CTX = 32768           # biggest context window asked of a local model
+# Worst case seen: qwen3 read a number-heavy price list as 1.83 chars/token (phi4: 2.5).
+# Under-estimating is what breaks: Ollama then drops the start of the prompt - the schema and
+# rules - and the model writes placeholder slides.
+CHARS_PER_TOKEN = 1.8
+
+
+def reply_budget(model: str) -> int:
+    """num_predict for a model; thinking counts against it, so thinking models get more."""
+    return MAX_REPLY_TOKENS + (THINK_TOKENS if not model.startswith("api:") and thinks(model) else 0)
+
+
+def source_limit(model: str) -> int:
+    """Characters of source that still leave room for the rules and the reply."""
+    if is_online(model):
+        return 60_000
+    return int((MAX_CTX - reply_budget(model) - 2500) * CHARS_PER_TOKEN)
 REPLY_TIMEOUT = 1800      # seconds per model reply
 
 
+def thinks(model: str) -> bool:
+    return "thinking" in (model_caps(model) or [])
+
+
+def think_option(model: str) -> dict:
+    """gpt-oss thinks at length by default and used its whole reply budget doing so: keep it low.
+    qwen3 / deepseek-r1 keep thinking - with it off their specs ran away or came out as
+    placeholders - and get extra reply budget instead (see ask_ollama)."""
+    return {"think": "low"} if model.startswith("gpt-oss") and thinks(model) else {}
+
+
+def ollama_stream(path: str, payload: dict, timeout: int, stage: str) -> tuple[str, str]:
+    """POST to Ollama with streaming on; returns (text, done_reason). Streaming lets a
+    cancelled or skipped run close the connection, which makes Ollama stop generating."""
+    payload["stream"] = True
+    req = urllib.request.Request(f"{OLLAMA}{path}", json.dumps(payload).encode(),
+                                 {"Content-Type": "application/json"})
+    text, reason = [], ""
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        for line in r:
+            if STOP.is_set() or stage in SKIP:
+                break  # leaving the `with` closes the connection
+            chunk = json.loads(line)
+            if chunk.get("error"):
+                raise ValueError(chunk["error"])
+            text.append(chunk.get("response") or (chunk.get("message") or {}).get("content") or "")
+            reason = chunk.get("done_reason") or reason
+    return "".join(text), reason
+
+
 def ask_ollama(model: str, prompt: str) -> str:
-    # Context sized to the prompt (~3.5 chars/token) + room for the reply, in 8k steps.
-    # A fixed 32k window reserves several GB of memory even for a short document.
-    num_ctx = min(32768, math.ceil((len(prompt) / 3.5 + MAX_REPLY_TOKENS) / 8192) * 8192)
-    body = json.dumps({"model": model, "stream": False, "format": "json",
-                       "messages": [{"role": "user", "content": prompt}],
-                       # num_predict caps the reply: in JSON mode small models can loop forever
-                       # (e.g. endless whitespace); a capped, cut-off reply just fails validation
-                       # and gets retried instead of hanging until the timeout.
-                       "options": {"temperature": 0.3, "num_ctx": num_ctx,
-                                   "num_predict": MAX_REPLY_TOKENS, "repeat_penalty": 1.1}}).encode()
-    req = urllib.request.Request(f"{OLLAMA}/api/chat", body, {"Content-Type": "application/json"})
+    # num_predict caps the reply: in JSON mode small models can loop forever (e.g. endless
+    # whitespace); a capped, cut-off reply just fails validation and gets retried instead of
+    # hanging until the timeout.
+    budget = reply_budget(model)
+    # Context sized to the prompt + room for the reply, in 4k steps: a fixed 32k window
+    # reserves several GB of memory even for a short document.
+    num_ctx = min(MAX_CTX, math.ceil((len(prompt) / CHARS_PER_TOKEN + budget) / 4096) * 4096)
+    think = think_option(model)
+    payload = {"model": model, "format": "json", "messages": [{"role": "user", "content": prompt}], **think,
+               "options": {"temperature": 0.3, "num_ctx": num_ctx, "num_predict": budget, "repeat_penalty": 1.1}}
     try:
-        with urllib.request.urlopen(req, timeout=REPLY_TIMEOUT) as r:
-            return json.loads(r.read())["message"]["content"]
+        text, reason = ollama_stream("/api/chat", payload, REPLY_TIMEOUT, "write")
+        if reason == "length" and not text.strip():
+            log.warning("%s used its whole reply budget before writing anything", model)
+        return text
     except TimeoutError:  # raised directly (not as URLError) when the reply is too slow
         sys.exit(f"{model} did not finish within {REPLY_TIMEOUT // 60} minutes. It may be too big for the "
                  "free memory (running partly on the CPU) - try a smaller model or fewer slides.")
@@ -1256,7 +1368,8 @@ def content_checks(spec: dict, source: str) -> list[str]:
         missing = [v for v in vals if f"{v:g}" not in numbers]
         if missing or len(set(vals)) < 2:
             errors.append(f"slide {i}: chart values {missing or vals} are not real data from the source; remove this chart or use a table/cards instead")
-    code_lines = [l for l in source.splitlines() if any(h in l for h in CODE_HINTS)]
+    code_lines = [l for l in source.splitlines()  # markdown table rows ("|---|") are not commands
+                  if any(h in l for h in CODE_HINTS) and not l.lstrip().startswith("|")]
     if len(code_lines) >= 3 and not any(s.get("type") == "code" for s in spec.get("slides", [])):
         errors.append("the source contains commands (e.g. " + repr(code_lines[0].strip()[:60]) + ") but there is no "
                       "\"code\" slide; add code slides with the commands copied exactly")
@@ -1302,9 +1415,71 @@ def add_missing_images(spec: dict, files: list[Path], source: str) -> list[str]:
     return added
 
 
+SLIDE_PROMPT = """You edit one slide of an existing slide deck.
+
+Reply with ONLY one JSON object: a single slide in one of the formats inside "slides" here:
+{schema}
+
+The deck "{title}" has these slides:
+{outline}
+
+TASK: {task}
+{instruction}
+Rules: max 6 bullets, max 20 words each; use only facts from the source; do not invent numbers;
+write in the same language as the other slides unless told otherwise; image paths only as listed
+in the source as ![image](path).
+
+SOURCE DOCUMENTS:
+{content}"""
+
+
+def ai_slide(model: str, spec: dict, base: Path, index: int, instruction: str, insert: bool) -> dict:
+    """Ask the model for one slide: a rewrite of slide `index` (0-based), or (insert=True) a new
+    slide to go after it. Returns the slide; the caller puts it into the deck."""
+    slides = spec.get("slides", [])
+    outline = "\n".join(f"{i + 1}. [{s.get('type')}] {s.get('title', '')}" for i, s in enumerate(slides))
+    if insert:
+        task = f"Write a NEW slide to insert after slide {index + 1}; do not repeat what other slides say."
+    else:
+        task = (f"Rewrite slide {index + 1}. Its current content:\n" +
+                json.dumps({k: v for k, v in slides[index].items() if not k.startswith("_")}, ensure_ascii=False))
+    md = base / "extracted.md"
+    content = md.read_text(encoding="utf-8")[:source_limit(model)] if md.exists() else "(not available)"
+    prompt = SLIDE_PROMPT.format(schema=SCHEMA, title=spec.get("title", ""), outline=outline, task=task,
+                                 instruction=f"INSTRUCTION FROM THE USER: {instruction}\n" if instruction else "",
+                                 content=content)
+    errors = []
+    for attempt in range(3):
+        checkpoint()
+        log.info("asking %s for one slide (attempt %d)", model, attempt + 1)
+        try:
+            reply = json.loads(ask_llm(model, prompt))
+        except json.JSONDecodeError as e:
+            reply, errors = None, [f"reply was not valid JSON: {e}"]
+        if isinstance(reply, dict):  # unwrap {"slide": {...}} / {"slides": [{...}]}
+            inner = reply.get("slide") or (reply.get("slides") or [None])[0]
+            slide = inner if isinstance(inner, dict) and "type" not in reply else reply
+            errors = validate({"slides": [slide]}, base)
+            if not errors:
+                return slide
+        prompt += ("\n\nYour previous reply had these problems:\n- " + "\n- ".join(errors) +
+                   "\nReply again with the full corrected slide JSON.")
+    sys.exit(f"{model} could not write a usable slide: {'; '.join(errors)}")
+
+
+def count_rule(slides: int, mode: str) -> str:
+    """mode: exact = about N, min = at least N (more if the source needs it), auto = model decides."""
+    if mode == "auto" or slides <= 0:
+        return ("Choose the number of slides the source needs (usually 6-20): cover every important "
+                "point, but do not pad.")
+    if mode == "min":
+        return f"At least {slides} slides - more if the source has enough material, never fewer."
+    return f"About {slides} slides."
+
+
 def auto(files: list[Path], out: Path | None, model: str, slides: int, extra: str,
          preview: bool, animate: bool = True, vision: str | None = "auto",
-         workdir: Path | None = None, design: str | None = None) -> Path:
+         workdir: Path | None = None, design: str | None = None, slide_mode: str = "exact") -> Path:
     if is_online(model):
         log.warning("%s is an online model - the extracted document text will be sent to it "
                     "(file reading, OCR and image descriptions still run locally)", model_label(model))
@@ -1312,30 +1487,45 @@ def auto(files: list[Path], out: Path | None, model: str, slides: int, extra: st
     work = workdir or first.parent / f"{first.stem}_ppt"  # extract, assets, spec, previews
     md = extract_all(files, work, vision)
     content = md.read_text(encoding="utf-8")
-    if len(content) > 60_000:
-        log.warning("source is %d chars; truncating to 60000 for the model", len(content))
-        content = content[:60_000]
-    prompt = PROMPT.format(schema=SCHEMA, slides=slides, content=content,
-                           extra=f"- {extra}\n" if extra else "")
+    if len(content) > (limit := source_limit(model)):
+        log.warning("source is %d chars; only the first %d fit in the model's memory window", len(content), limit)
+        content = content[:limit]
+    prompt = PROMPT.format(schema=SCHEMA, count=count_rule(slides, slide_mode), content=content,
+                           extra=f"\nHINTS FROM THE USER (follow them; they override the rules above):\n{extra}\n"
+                           if extra else "")
     spec_path = work / "spec.json"
+    usable = None  # last spec that renders, even if content_checks still complain about it
     for attempt in range(3):
         log.info("asking %s for a slide spec (attempt %d) - this can take a few minutes", model, attempt + 1)
-        reply = ask_llm(model, prompt)
+        try:
+            reply = ask_llm(model, prompt)
+        except Skipped:
+            log.info("skipped further attempts")
+            break
         try:
             spec = json.loads(reply)
-            errors = validate(spec, work) + content_checks(spec, content)
+            errors = validate(spec, work)
         except json.JSONDecodeError as e:
-            spec, errors = None, [f"reply was not valid JSON: {e}"]
+            spec, errors = None, [f"reply was not valid JSON: {e}" +
+                                  (" - it is empty or cut off; write fewer, shorter slides and tables of at most 8 rows"
+                                   if e.pos >= len(reply.rstrip()) - 2 else "")]
+        if spec is not None and not errors:
+            usable = spec
+            errors = content_checks(spec, content)  # quality complaints: worth a retry, not a failure
+            if slide_mode == "min" and slides > 0 and len(spec["slides"]) < slides:
+                errors.append(f"only {len(spec['slides'])} slides; write at least {slides} slides")
         if spec is not None:
             spec_path.write_text(json.dumps(spec, indent=2, ensure_ascii=False), encoding="utf-8")
-        if not errors:
+        if not errors or "write" in SKIP:
             break
         log.warning("spec problems: %s", "; ".join(errors))
         prompt += ("\n\nYour previous reply had these problems:\n- " + "\n- ".join(errors) +
                    "\nReply again with the full corrected JSON.")
-    else:
-        sys.exit(f"Model could not produce a valid spec. Last attempt saved to {spec_path}; "
-                 f"fix it by hand and run: make_ppt.py build \"{spec_path}\"")
+    if usable is None:
+        sys.exit(f"{model} did not write a usable slide spec in {attempt + 1} attempt(s). Try another model "
+                 f"(non-thinking models such as qwen2.5 or phi4 are the most reliable), fewer slides, or "
+                 f"fix the last attempt by hand ({spec_path}) and run: make_ppt.py build \"{spec_path}\"")
+    spec = usable
     slides = spec["slides"]  # drop section dividers with nothing after them
     spec["slides"] = [s for i, s in enumerate(slides) if not (
         s.get("type") == "section" and
@@ -1412,7 +1602,8 @@ def main() -> None:
     a.add_argument("-m", "--model", default=DEFAULT_MODEL)
     a.add_argument("--vision", default="auto", help="vision model for describing images (default: best installed)")
     a.add_argument("--no-vision", action="store_true", help="do not describe images")
-    a.add_argument("-n", "--slides", type=int, default=10)
+    a.add_argument("-n", "--slides", type=int, default=10, help="0 = let the model decide")
+    a.add_argument("--at-least", action="store_true", help="-n is a minimum: the model may write more")
     a.add_argument("-i", "--instructions", default="", help='e.g. "audience: management, focus on costs"')
     a.add_argument("--no-preview", action="store_true")
     a.add_argument("--no-animate", action="store_true", help="no fade transitions/animations")
@@ -1429,7 +1620,8 @@ def main() -> None:
         build(args.spec, args.out, not args.no_preview, not args.no_animate, args.design)
     elif args.cmd == "auto":
         auto(args.files, args.out, args.model, args.slides, args.instructions, not args.no_preview,
-             not args.no_animate, None if args.no_vision else args.vision, design=args.design)
+             not args.no_animate, None if args.no_vision else args.vision, design=args.design,
+             slide_mode="min" if args.at_least else "exact")
     elif args.cmd == "families":
         render_family_thumbnails()
     else:
