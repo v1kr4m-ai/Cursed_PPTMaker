@@ -513,6 +513,34 @@ def validate(spec: dict, base: Path) -> list[str]:
     return errors
 
 
+def repair(spec: dict, base: Path) -> list[str]:
+    """Fix model mistakes that need no second opinion, so they don't fail a whole deck:
+    made-up picture paths are dropped (a picture slide without one becomes bullets), and
+    slides still missing their content are removed. Returns what was changed."""
+    if not isinstance(spec, dict) or not isinstance(spec.get("slides"), list):
+        return []
+    normalize(spec)
+    done, keep = [], []
+    for i, s in enumerate(spec["slides"], 1):
+        if not isinstance(s, dict):
+            continue
+        img = s.get("image")
+        if img and not (isinstance(img, str) and (base / img).is_file()):
+            s.pop("image")
+            done.append(f"slide {i}: dropped made-up picture {str(img)[:60]!r}")
+            if s.get("type") == "image":
+                s["type"] = "bullets"
+                s["bullets"] = s.get("bullets") or [x for x in (s.get("caption"),) if x]
+        t = s.get("type")
+        if t in REQUIRED and any(not s.get(k) for k in REQUIRED[t]):
+            done.append(f"slide {i} ({t}): removed, it had no content")
+            continue
+        keep.append(s)
+    if len(keep) >= 2:  # never repair a deck away entirely; let validate() report instead
+        spec["slides"] = keep
+    return done
+
+
 def _text(v) -> str:
     """A list item a model wrote as an object -> plain text ('Lead: detail')."""
     if isinstance(v, dict):
@@ -1255,29 +1283,36 @@ def model_label(model: str) -> str:
     return f"{model} (Ollama cloud)" if is_online(model) else f"{model} (Ollama, local)"
 
 
-def ask_llm(model: str, prompt: str) -> str:
+def ask_llm(model: str, prompt: str, reply: int = 0) -> str:
     """Route to an OpenAI-compatible API provider (api:<id>:<model>) or to Ollama."""
     if model.startswith("api:"):
         import providers
         try:
-            return interruptible(lambda: providers.chat_json(model, prompt, MAX_REPLY_TOKENS, REPLY_TIMEOUT), "write")
+            return interruptible(lambda: providers.chat_json(model, prompt, reply or MAX_REPLY_TOKENS, REPLY_TIMEOUT), "write")
         except ValueError as e:
             sys.exit(str(e))
-    return interruptible(lambda: ask_ollama(model, prompt), "write")
+    return interruptible(lambda: ask_ollama(model, prompt, reply), "write")
 
 
-MAX_REPLY_TOKENS = 6144   # a 20-slide spec is ~4k tokens
+MAX_REPLY_TOKENS = 6144   # a 20-slide spec is ~4k tokens; bigger decks get more (spec_tokens)
 THINK_TOKENS = 6144       # extra room for a thinking model's reasoning
-MAX_CTX = 32768           # biggest context window asked of a local model
+MAX_CTX = 32768           # context window the source is sized against
+MAX_CTX_BIG = 65536       # ...which a long deck's reply may stretch to
 # Worst case seen: qwen3 read a number-heavy price list as 1.83 chars/token (phi4: 2.5).
 # Under-estimating is what breaks: Ollama then drops the start of the prompt - the schema and
 # rules - and the model writes placeholder slides.
 CHARS_PER_TOKEN = 1.8
 
 
-def reply_budget(model: str) -> int:
+def spec_tokens(slides: int, mode: str) -> int:
+    """Reply tokens a deck of this size needs (~200 per slide, plus margin)."""
+    n = 40 if mode == "auto" or slides <= 0 else slides * (1.25 if mode == "min" else 1)
+    return max(MAX_REPLY_TOKENS, int(n * 280 + 1000))
+
+
+def reply_budget(model: str, reply: int = 0) -> int:
     """num_predict for a model; thinking counts against it, so thinking models get more."""
-    return MAX_REPLY_TOKENS + (THINK_TOKENS if not model.startswith("api:") and thinks(model) else 0)
+    return (reply or MAX_REPLY_TOKENS) + (THINK_TOKENS if not model.startswith("api:") and thinks(model) else 0)
 
 
 def source_limit(model: str) -> int:
@@ -1318,14 +1353,14 @@ def ollama_stream(path: str, payload: dict, timeout: int, stage: str) -> tuple[s
     return "".join(text), reason
 
 
-def ask_ollama(model: str, prompt: str) -> str:
+def ask_ollama(model: str, prompt: str, reply: int = 0) -> str:
     # num_predict caps the reply: in JSON mode small models can loop forever (e.g. endless
     # whitespace); a capped, cut-off reply just fails validation and gets retried instead of
     # hanging until the timeout.
-    budget = reply_budget(model)
+    budget = reply_budget(model, reply)
     # Context sized to the prompt + room for the reply, in 4k steps: a fixed 32k window
     # reserves several GB of memory even for a short document.
-    num_ctx = min(MAX_CTX, math.ceil((len(prompt) / CHARS_PER_TOKEN + budget) / 4096) * 4096)
+    num_ctx = min(MAX_CTX_BIG, math.ceil((len(prompt) / CHARS_PER_TOKEN + budget) / 4096) * 4096)
     think = think_option(model)
     payload = {"model": model, "format": "json", "messages": [{"role": "user", "content": prompt}], **think,
                "options": {"temperature": 0.3, "num_ctx": num_ctx, "num_predict": budget, "repeat_penalty": 1.1}}
@@ -1459,6 +1494,7 @@ def ai_slide(model: str, spec: dict, base: Path, index: int, instruction: str, i
         if isinstance(reply, dict):  # unwrap {"slide": {...}} / {"slides": [{...}]}
             inner = reply.get("slide") or (reply.get("slides") or [None])[0]
             slide = inner if isinstance(inner, dict) and "type" not in reply else reply
+            repair({"slides": [slide]}, base)  # drops a made-up picture path
             errors = validate({"slides": [slide]}, base)
             if not errors:
                 return slide
@@ -1467,10 +1503,63 @@ def ai_slide(model: str, spec: dict, base: Path, index: int, instruction: str, i
     sys.exit(f"{model} could not write a usable slide: {'; '.join(errors)}")
 
 
+MORE_PROMPT = """You are adding slides to an existing slide deck.
+
+Reply with ONLY a JSON object {{"slides": [...]}} holding exactly {n} NEW slides, each in one of
+the slide formats shown here:
+{schema}
+
+The deck "{title}" already has these slides:
+{outline}
+
+Write {n} more slides: cover source material the deck does not cover yet, or go one level
+deeper (one product, step, section or table part per slide). No "title" or "closing" slides,
+and do not repeat an existing title.
+Rules: max 6 bullets, max 20 words each; use only facts from the source; do not invent numbers;
+same language as the other slides; image paths only as listed in the source as ![image](path).
+{extra}
+SOURCE DOCUMENTS:
+{content}"""
+
+BATCH = 8  # slides asked for per top-up round
+
+
+def extend(model: str, spec: dict, base: Path, content: str, target: int, extra: str) -> None:
+    """Add slides in batches (before the closing slide) until the deck has `target` slides."""
+    for _ in range(math.ceil(60 / BATCH)):
+        slides = spec["slides"]
+        n = min(BATCH, target - len(slides))
+        if n <= 0 or "write" in SKIP:
+            return
+        checkpoint()
+        log.info("asking %s for %d more slides (%d of %d so far)", model, n, len(slides), target)
+        outline = "\n".join(f"{i + 1}. [{s.get('type')}] {s.get('title', '')}" for i, s in enumerate(slides))
+        prompt = MORE_PROMPT.format(n=n, schema=SCHEMA, title=spec.get("title", ""), outline=outline,
+                                    extra=f"HINTS FROM THE USER: {extra}\n" if extra else "", content=content)
+        try:
+            reply = json.loads(ask_llm(model, prompt, spec_tokens(n, "exact")))
+        except (json.JSONDecodeError, Skipped) as e:
+            log.warning("no more slides added (%s)", e if isinstance(e, json.JSONDecodeError) else "skipped")
+            return
+        new = reply.get("slides") if isinstance(reply, dict) else reply
+        batch = {"slides": [s for s in new or [] if isinstance(s, dict)]}
+        repair(batch, base)
+        titles = {str(s.get("title", "")).strip().lower() for s in slides}
+        good = [s for s in batch["slides"] if s.get("type") not in ("title", "closing")
+                and str(s.get("title", "")).strip().lower() not in titles
+                and not validate({"slides": [s]}, base)]
+        if not good:
+            log.warning("the model added no usable new slides; keeping %d", len(slides))
+            return
+        at = len(slides) - 1 if slides and slides[-1].get("type") == "closing" else len(slides)
+        slides[at:at] = good
+        log.info("added %d slides", len(good))
+
+
 def count_rule(slides: int, mode: str) -> str:
     """mode: exact = about N, min = at least N (more if the source needs it), auto = model decides."""
     if mode == "auto" or slides <= 0:
-        return ("Choose the number of slides the source needs (usually 6-20): cover every important "
+        return ("Choose the number of slides the source needs (usually 6-30, at most 60): cover every important "
                 "point, but do not pad.")
     if mode == "min":
         return f"At least {slides} slides - more if the source has enough material, never fewer."
@@ -1498,12 +1587,14 @@ def auto(files: list[Path], out: Path | None, model: str, slides: int, extra: st
     for attempt in range(3):
         log.info("asking %s for a slide spec (attempt %d) - this can take a few minutes", model, attempt + 1)
         try:
-            reply = ask_llm(model, prompt)
+            reply = ask_llm(model, prompt, spec_tokens(slides, slide_mode))
         except Skipped:
             log.info("skipped further attempts")
             break
         try:
             spec = json.loads(reply)
+            if fixed := repair(spec, work):
+                log.warning("repaired: %s", "; ".join(fixed))
             errors = validate(spec, work)
         except json.JSONDecodeError as e:
             spec, errors = None, [f"reply was not valid JSON: {e}" +
@@ -1512,8 +1603,6 @@ def auto(files: list[Path], out: Path | None, model: str, slides: int, extra: st
         if spec is not None and not errors:
             usable = spec
             errors = content_checks(spec, content)  # quality complaints: worth a retry, not a failure
-            if slide_mode == "min" and slides > 0 and len(spec["slides"]) < slides:
-                errors.append(f"only {len(spec['slides'])} slides; write at least {slides} slides")
         if spec is not None:
             spec_path.write_text(json.dumps(spec, indent=2, ensure_ascii=False), encoding="utf-8")
         if not errors or "write" in SKIP:
@@ -1526,6 +1615,11 @@ def auto(files: list[Path], out: Path | None, model: str, slides: int, extra: st
                  f"(non-thinking models such as qwen2.5 or phi4 are the most reliable), fewer slides, or "
                  f"fix the last attempt by hand ({spec_path}) and run: make_ppt.py build \"{spec_path}\"")
     spec = usable
+    # Local models write ~10 slides per answer whatever they are asked; retrying the whole deck
+    # doesn't change that, so a short deck is topped up with batches of new slides instead.
+    target = slides if slide_mode == "min" else int(slides * 0.9) if slide_mode == "exact" else 0
+    if slides > 0 and len(spec["slides"]) < target:
+        extend(model, spec, work, content, target, extra)
     slides = spec["slides"]  # drop section dividers with nothing after them
     spec["slides"] = [s for i, s in enumerate(slides) if not (
         s.get("type") == "section" and

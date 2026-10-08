@@ -149,7 +149,7 @@ click any chip to jump straight to that setting.
 |---|---|
 | **Sources** | drop files onto the window, or click to browse; remove any with ✕ |
 | **Model** | grouped as *On this PC* (offline, with sizes; blue dot = fits in free memory now, grey = may not), *Ollama cloud* and *API providers* (online, amber dot); **+ Add online model…** adds an API provider |
-| **Slides / Hints** | *Model decides* (the model picks how many the content needs), *At least N* (it may write more, never fewer) or *About N* (4–20); plus optional hints the model must follow, e.g. `audience: management, write in Hindi, one slide per product` |
+| **Slides / Hints** | *Model decides* (the model picks how many the content needs), *At least N* (it may write more, never fewer) or *About N* (4–60) — local models write ~8–10 slides per answer, so longer decks are topped up in batches of 8 new slides; plus optional hints the model must follow, e.g. `audience: management, write in Hindi, one slide per product` |
 | **Image model** | which model describes your pictures: *Auto* (best local vision model), *Off*, a specific local vision model, an Ollama cloud vision model, or an API model that accepts images; online choices are marked amber |
 | **Design** | *Default style* or one of six design families, shown as live previews; each has its own covers, section slides, step/card/number layouts, fonts and colours |
 | **Animations** | fade transitions and entrance animations on or off |

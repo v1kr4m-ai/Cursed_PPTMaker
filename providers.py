@@ -157,6 +157,9 @@ def chat_json(model: str, prompt: str, max_tokens: int, timeout: int) -> str:
             break
         except urllib.error.HTTPError as e:
             reason = _http_reason(e)
+            if e.code == 400 and attempt == 0 and "max_tokens" in reason and body["max_tokens"] > 8192:
+                body["max_tokens"] = 8192  # the model's output limit is lower than a long deck asks for
+                continue
             if e.code == 400 and attempt == 0 and "response_format" in body:
                 body.pop("response_format")  # some providers/models don't support JSON mode
                 continue

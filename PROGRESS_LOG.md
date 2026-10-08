@@ -252,3 +252,17 @@
 - Tested: API (load, reorder/delete, preview 5 s, page-only keys stripped, AI insert with
   llama3.2, validation errors), slide_map on the example deck (16 deck slides -> 15 spec slides),
   headless renders of editor and main panel.
+
+## 2026-10-07 — Up to 60 slides, desktop shortcut
+- Slider max 20 -> 60. Reply budget now scales with deck size (spec_tokens: ~280 tokens/slide,
+  +25% for "at least", 40-slide room for "model decides"; minimum still 6144). The source is
+  still sized against a 32k window; a long deck's reply may stretch the window to 64k.
+  API providers: if a model rejects the larger max_tokens, retry once at 8192.
+- app.ico (blue logo icon) + desktop shortcut running pythonw app.py directly.
+- Test: llama3.2 at 30 slides failed on made-up picture paths (https://example.com/...) and an
+  empty code slide -> repair() drops invented pictures (picture slide -> bullets) and removes
+  empty slides before validation instead of failing the deck.
+- Local models stop at ~10 slides whatever they are asked (phi4: 11/10/10 over 3 full retries,
+  15 min). Whole-deck count retries removed; extend() now tops a short deck up in batches of 8
+  ("about N" aims for 90% of N, "at least N" for N), listing existing titles so nothing repeats,
+  stopping when a batch adds nothing usable or Skip is pressed.
