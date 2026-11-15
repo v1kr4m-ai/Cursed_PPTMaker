@@ -266,3 +266,35 @@
   15 min). Whole-deck count retries removed; extend() now tops a short deck up in batches of 8
   ("about N" aims for 90% of N, "at least N" for N), listing existing titles so nothing repeats,
   stopping when a batch adds nothing usable or Skip is pressed.
+
+## 2026-11-15 — Whole-document reading, speaker scripts, no more silent "animate: false"
+- Report: hint "make the script for each slide" ignored, no animations, text-only slides, model
+  reads only part of the document. Checked the NGIF checklist deck (gpt-oss:20b, 53 slides).
+- No animations: the schema shown to the model ended with `"animate": false` as an example and
+  the model copied it. Line moved out of the prompt (SCHEMA_EXTRA); auto() drops the key. Same
+  copy-the-example slip for palette ("forest | coral | teal") -> normalize() picks the first valid.
+- Only half the document read: 64k chars against a 32k-char window, the rest was cut. Now
+  split_source() cuts the extract at page/heading breaks; part 1 makes the deck, each later part
+  adds its share of slides through extend().
+- Script: add_scripts() is a second pass, 5 slides per request, source first in the prompt (so
+  Ollama reuses it): 4-7 sentences + "Reference: file, page" into each slide's notes. qwen2.5:7b:
+  ~105 s per 5 slides. Skip on the write step stops it.
+- Text-only: 47 of 53 slides were bullets. diversify() turns "Lead: detail" bullet slides into
+  cards / steps when over a third of the deck is bullets (16 converted on that deck). Charts
+  still need real numbers in the source; there is no picture generator.
+- Too few slides asked for: estimate = chars / 2000 (max 60); in "About N" mode the app asks
+  (native dialog) whether to make that many instead. CLI only warns.
+- test_make_ppt.py: model-free checks for split_source / diversify / palette.
+
+## 2026-11-15 — Slide pictures from local ComfyUI
+- imagegen.py: txt2img through ComfyUI's HTTP API (/prompt, /history, /view). Finds ComfyUI at
+  COMFYUI_URL (default :8188); if down, starts the portable install (COMFYUI_DIR or
+  F:\ComfyUI\ComfyUI_windows_portable) and stops it afterwards. Picks SDXL base (1344x768),
+  else Juggernaut / DreamShaper / SD1.5. Negative prompt bans text/letters (diffusion text is garbage).
+- Art lines: add_scripts() also asks for an "art" line per slide (English, no text) when art is on.
+  add_art() draws up to MAX_ART=12 for bullet slides (the only type with a picture slot), runs
+  after diversify(). Ollama models are unloaded first and ComfyUI is /free'd after, so the 8 GB
+  GPU is not shared. Skip on the Write step or Cancel stops it. A failure costs pictures, not the deck.
+- UI: "Slide pictures (local ComfyUI)" switch in settings (off by default); CLI: --art.
+- Measured on RTX 5060 laptop: SDXL 22 s per picture; picture lands in the card beside the bullets.
+- Tested: real draw, add_art on 2 slides, render of the slide. Full app run with a text model not done.

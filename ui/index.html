@@ -553,6 +553,7 @@
 
     <div id="set-anim" class="toggle-row">
         <label class="toggle">Animations <button class="switch" role="switch" aria-checked="true" id="t-anim"></button></label>
+        <label class="toggle" title="Needs ComfyUI installed on this PC; adds about a minute per picture">Slide pictures (local ComfyUI) <button class="switch" role="switch" aria-checked="false" id="t-art"></button></label>
     </div>
     </div>
     <div class="drawer-foot"><button class="mini" id="settings-done">Done</button></div>
@@ -858,6 +859,7 @@ function updateSummary() {
     ["outdir", "Save", folder, null, false],
   ];
   if ($("t-anim").getAttribute("aria-checked") !== "true") chips.push(["anim", "Animations", "off", null, false]);
+  if ($("t-art").getAttribute("aria-checked") === "true") chips.push(["anim", "Pictures", "ComfyUI", null, false]);
   el.replaceChildren(...chips.map(([sec, k, val, dot, warn]) => {
     const b = document.createElement("button");
     b.className = "soft schip" + (warn ? " warn" : "");
@@ -977,7 +979,7 @@ function setSlideMode(mode) {
 for (const b of $("n-mode").children) b.onclick = () => setSlideMode(b.dataset.mode);
 slider.oninput = paintSlider;
 let savedMode = "exact"; try { savedMode = localStorage.getItem("slideMode") || "exact"; } catch {}
-for (const id of ["t-anim"]) $(id).onclick = e => { e.preventDefault(); const t = $(id); t.setAttribute("aria-checked", t.getAttribute("aria-checked") !== "true"); updateSummary(); };
+for (const id of ["t-anim", "t-art"]) $(id).onclick = e => { e.preventDefault(); const t = $(id); t.setAttribute("aria-checked", t.getAttribute("aria-checked") !== "true"); updateSummary(); };
 const on = id => $(id).getAttribute("aria-checked") === "true";
 
 function updateGo() {
@@ -997,7 +999,7 @@ $("go").onclick = async () => {
   if (state.busy) { $("go-txt").textContent = "Cancelling…"; return pywebview.api.cancel(); }
   resetRun("Building your deck");
   await pywebview.api.generate({ files: state.files, model: state.model, slides: +slider.value, slide_mode: state.slideMode,
-                                 focus: $("focus").value, animate: on("t-anim"), vision: state.visionModel ?? "auto", design: state.design || "",
+                                 focus: $("focus").value, animate: on("t-anim"), art: on("t-art"), vision: state.visionModel ?? "auto", design: state.design || "",
                                  outdir: state.outdir });
 };
 

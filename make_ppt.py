@@ -478,8 +478,9 @@ SCHEMA = """{
     {"type": "closing", "title": "...", "items": ["checklist or key takeaways"]}
   ]
 }
-Every slide may also have "kicker" (small label above the title) and "notes" (speaker notes).
-Top level may set "animate": false to turn off fade transitions and entrance animations."""
+Every slide may also have "kicker" (small label above the title) and "notes" (speaker notes)."""
+# Not shown to the model: it copied the example and switched animation off for the whole deck.
+SCHEMA_EXTRA = 'Top level may set "animate": false to turn off fade transitions and entrance animations.'
 
 REQUIRED = {"title": ["title"], "section": ["title"], "bullets": ["title", "bullets"],
             "cards": ["title", "cards"], "steps": ["title", "steps"], "stats": ["title", "stats"],
@@ -558,7 +559,12 @@ DEFAULT_TITLES = {"title": "Overview", "section": "Next", "bullets": "Key points
 def normalize(spec: dict) -> None:
     """Fix the shapes small local models commonly get wrong, in place, before validation:
     image as an object, a single bullet as a string, list items as objects, numbers as text."""
-    for s in spec.get("slides", []) if isinstance(spec, dict) else []:
+    if not isinstance(spec, dict):
+        return
+    pal = spec.get("palette")
+    if isinstance(pal, str) and pal not in PALETTES:  # the schema's "a | b | c" list copied whole
+        spec["palette"] = next((p for p in re.findall(r"[a-z]+", pal.lower()) if p in PALETTES), "violet")
+    for s in spec.get("slides", []):
         if not isinstance(s, dict):
             continue
         if not str(s.get("title") or "").strip() and s.get("type") in DEFAULT_TITLES:
@@ -1234,7 +1240,8 @@ Reply with ONLY a JSON object in this format:
 Rules:
 - {count} Start with a "title" slide, end with a "closing" slide.
 - Use at most one "section" slide per 5 slides, and none in decks under 10 slides.
-- Vary slide types. Prefer cards, steps, stats, tables and charts over plain bullets.
+- Vary slide types. Prefer cards, steps, stats, tables and charts over plain bullets:
+  at most one slide in three may be "bullets".
 - Keep the whole reply short: tables at most 8 rows, never copy a long table whole.
 - Max 6 bullets per slide, max 20 words each. A bullet may start with a short bold label and a colon, e.g. "Budget: 12 lakh".
 - Put the detail that does not fit on the slide into "notes".
@@ -1556,6 +1563,159 @@ def extend(model: str, spec: dict, base: Path, content: str, target: int, extra:
         log.info("added %d slides", len(good))
 
 
+SCRIPT_PROMPT = """SOURCE DOCUMENTS:
+{content}
+
+END OF THE SOURCE.
+
+You write the speaker script for slides of the deck "{title}", which was made from the source above.
+For each slide below, write what the presenter says aloud while it is on screen: 4 to 7 full
+sentences that explain the slide, using the detail from the source that did not fit on the slide.
+Do not just read the slide text out and do not mention slide numbers. Use only facts from the source. Write in the language of the slide.
+End every script with a last line "Reference: ..." naming where in the source it comes from
+(file name and page number or heading).
+{extra}
+{art_rule}Reply with ONLY a JSON object {reply_shape} holding exactly
+{n} strings per list, in the order of the slides.
+
+SLIDES:
+{slides}"""
+
+SCRIPT_BATCH = 5  # slides per script request
+
+
+ART_RULE = ('Also write an "art" line for each slide: 8-15 English words describing one simple illustration '
+            'for it (objects and scene; no text, no letters, no faces), even if the slide is not in English.\n')
+
+
+def add_scripts(model: str, title: str, slides: list[dict], content: str, extra: str, art: bool = False) -> None:
+    """Second pass: a speaker script + source reference in every slide's notes. Asking for this
+    in the deck request does not work with local models - they write one-line notes - so it is
+    asked separately, a few slides at a time. The source goes first in the prompt so the model
+    server can reuse it between requests. A slide keeps its old note if a request fails."""
+    for at in range(0, len(slides), SCRIPT_BATCH):
+        batch = slides[at:at + SCRIPT_BATCH]
+        if "write" in SKIP:
+            return
+        checkpoint()
+        log.info("asking %s for the speaker script of %d slides (%d of %d done)", model, len(batch), at, len(slides))
+        shown = json.dumps([{k: v for k, v in s.items() if k != "notes" and not k.startswith("_")} for s in batch],
+                           ensure_ascii=False, indent=1)
+        prompt = SCRIPT_PROMPT.format(content=content, title=title, n=len(batch), slides=shown,
+                                      extra=f"HINTS FROM THE USER: {extra}\n" if extra else "",
+                                      art_rule=ART_RULE if art else "",
+                                      reply_shape='{"notes": ["script for slide 1", "..."], "art": ["picture for slide 1", "..."]}'
+                                      if art else '{"notes": ["script for slide 1", "..."]}')
+        try:
+            reply = json.loads(ask_llm(model, prompt))
+        except Skipped:
+            log.info("skipped the remaining speaker scripts")
+            return
+        except json.JSONDecodeError as e:
+            log.warning("no script for slides %d-%d (%s)", at + 1, at + len(batch), e)
+            continue
+        notes = reply.get("notes") if isinstance(reply, dict) else reply
+        for s, note in zip(batch, notes if isinstance(notes, list) else []):
+            if text := _text(note).strip():
+                s["notes"] = text
+        arts = reply.get("art") if isinstance(reply, dict) and art else None
+        for s, line in zip(batch, arts if isinstance(arts, list) else []):
+            if text := _text(line).strip():
+                s["art"] = text[:200]
+
+
+MAX_ART = 12  # pictures per deck: ~30-60 s each on a laptop GPU
+
+
+def unload_ollama() -> None:
+    """Free the GPU for the image model: the text model is done, but Ollama keeps it loaded."""
+    try:
+        for m in json.loads(urllib.request.urlopen(f"{OLLAMA}/api/ps", timeout=3).read()).get("models", []):
+            urllib.request.urlopen(urllib.request.Request(
+                f"{OLLAMA}/api/generate", json.dumps({"model": m["name"], "keep_alive": 0}).encode(),
+                {"Content-Type": "application/json"}), timeout=30).read()
+    except (OSError, ValueError):
+        pass
+
+
+def add_art(spec: dict, work: Path) -> int:
+    """Draw a picture with local ComfyUI for up to MAX_ART bullet slides that have an "art" line,
+    and put it beside the bullets. A failure only costs the pictures, never the deck."""
+    import imagegen
+    todo = [s for s in spec["slides"] if s.get("type") == "bullets" and s.get("art") and not s.get("image")][:MAX_ART]
+    if not todo or "write" in SKIP:
+        return 0
+    imagegen.STOP = lambda: STOP.is_set() or "write" in SKIP
+    unload_ollama()
+    proc, done = None, 0
+    try:
+        log.info("starting ComfyUI for %d slide pictures", len(todo))
+        proc = imagegen.start()
+        ckpt, size = imagegen.pick_checkpoint()
+        (work / "assets").mkdir(exist_ok=True)
+        for i, s in enumerate(todo, 1):
+            checkpoint()
+            log.info("drawing slide picture %d of %d with %s", i, len(todo), ckpt)
+            name = f"art-{i:02d}.png"
+            imagegen.draw(s["art"], work / "assets" / name, ckpt, size)
+            s["image"] = f"assets/{name}"
+            done += 1
+    except (RuntimeError, OSError, ValueError, KeyError) as e:
+        checkpoint()  # a Cancel shows up here as "stopped"
+        if "write" not in SKIP:
+            log.warning("no more slide pictures (%s)", e)
+    finally:
+        imagegen.free_memory()
+        if proc:
+            proc.terminate()  # we started it, so we stop it
+    return done
+
+
+LEAD_SEP = re.compile(r":\s+|\s+[–—-]\s+")  # "Lead: detail" / "Lead - detail"
+STEP_WORDS = re.compile(r"\b(steps?|process|procedure|how to|workflow|stages?|phases?)\b", re.I)
+
+
+def diversify(spec: dict) -> int:
+    """Local models write nearly every slide as plain bullets. When over a third of the deck is
+    bullets, the bullet slides whose lines all read "Lead: detail" become cards (or steps), which
+    the design families draw as shapes - no model needed. Returns how many were converted."""
+    slides = spec["slides"]
+    plain = [s for s in slides if s.get("type") == "bullets"]
+    if len(plain) * 3 <= len(slides):
+        return 0
+    done = 0
+    for s in plain:
+        pairs = [LEAD_SEP.split(b, maxsplit=1) for b in s["bullets"]]
+        if s.get("image") or s.get("callout") or not 3 <= len(pairs) <= 6 or \
+                any(len(p) != 2 or len(p[0]) > 45 or not p[1].strip() for p in pairs):
+            continue
+        kind = "steps" if STEP_WORDS.search(s.get("title", "")) else "cards"
+        s[kind] = [{"title": a.strip(), "text": b.strip()} for a, b in pairs]
+        s["type"] = kind
+        del s["bullets"]
+        done += 1
+    return done
+
+
+CHARS_PER_SLIDE = 2000  # source text one slide can carry, with the detail going into its script
+
+
+def split_source(content: str, limit: int) -> list[str]:
+    """Cut the source into parts that each fit the model's window, at file / page / heading breaks."""
+    parts, cur = [], ""
+    for block in re.split(r"(?m)^(?=#{1,2} )", content):
+        for piece in (block[i:i + limit] for i in range(0, len(block), limit)):  # one huge page: hard cut
+            if cur and len(cur) + len(piece) > limit:
+                parts.append(cur)
+                cur = ""
+            cur += piece
+    if parts and len(cur) < limit * 0.15:  # a short tail is not worth a round of its own
+        parts[-1] += cur
+    elif cur.strip():
+        parts.append(cur)
+    return parts
+
+
 def count_rule(slides: int, mode: str) -> str:
     """mode: exact = about N, min = at least N (more if the source needs it), auto = model decides."""
     if mode == "auto" or slides <= 0:
@@ -1568,7 +1728,10 @@ def count_rule(slides: int, mode: str) -> str:
 
 def auto(files: list[Path], out: Path | None, model: str, slides: int, extra: str,
          preview: bool, animate: bool = True, vision: str | None = "auto",
-         workdir: Path | None = None, design: str | None = None, slide_mode: str = "exact") -> Path:
+         workdir: Path | None = None, design: str | None = None, slide_mode: str = "exact",
+         confirm=None, art: bool = False) -> Path:
+    """confirm(asked, needed) -> bool: called when the source looks too big for the slides asked
+    for; True = make `needed` slides instead. None (the CLI) = keep the number and warn."""
     if is_online(model):
         log.warning("%s is an online model - the extracted document text will be sent to it "
                     "(file reading, OCR and image descriptions still run locally)", model_label(model))
@@ -1576,12 +1739,29 @@ def auto(files: list[Path], out: Path | None, model: str, slides: int, extra: st
     work = workdir or first.parent / f"{first.stem}_ppt"  # extract, assets, spec, previews
     md = extract_all(files, work, vision)
     content = md.read_text(encoding="utf-8")
-    if len(content) > (limit := source_limit(model)):
-        log.warning("source is %d chars; only the first %d fit in the model's memory window", len(content), limit)
-        content = content[:limit]
+    needed = min(60, math.ceil(len(content) / CHARS_PER_SLIDE))
+    if slide_mode == "exact" and 0 < slides < needed * 0.7:
+        if confirm and confirm(slides, needed):
+            log.info("making about %d slides instead of %d", needed, slides)
+            slides = needed
+        else:
+            log.warning("the source looks like it needs about %d slides; keeping %d - the detail that "
+                        "does not fit goes into the speaker notes", needed, slides)
+    # A source bigger than the model's window is read part by part, so nothing is cut off:
+    # the first part makes the deck, every later part adds its share of slides (extend).
+    parts = split_source(content, source_limit(model))
+    share = [slides] * len(parts)
+    if len(parts) > 1:
+        total = slides if slide_mode == "exact" and slides > 0 else max(slides, needed)
+        share = [max(1, round(total * len(p) / len(content))) for p in parts]
+        log.info("the source is long (%d chars): reading it in %d parts", len(content), len(parts))
+        slides, slide_mode = share[0], "exact"
+    full, content = content, parts[0]
     prompt = PROMPT.format(schema=SCHEMA, count=count_rule(slides, slide_mode), content=content,
-                           extra=f"\nHINTS FROM THE USER (follow them; they override the rules above):\n{extra}\n"
-                           if extra else "")
+                           extra=(f"- This is part 1 of {len(parts)} of the source; the other parts get their own "
+                                  f"slides later.\n" if len(parts) > 1 else "") +
+                           (f"\nHINTS FROM THE USER (follow them; they override the rules above):\n{extra}\n"
+                            if extra else ""))
     spec_path = work / "spec.json"
     usable = None  # last spec that renders, even if content_checks still complain about it
     for attempt in range(3):
@@ -1615,11 +1795,24 @@ def auto(files: list[Path], out: Path | None, model: str, slides: int, extra: st
                  f"(non-thinking models such as qwen2.5 or phi4 are the most reliable), fewer slides, or "
                  f"fix the last attempt by hand ({spec_path}) and run: make_ppt.py build \"{spec_path}\"")
     spec = usable
+    spec.pop("animate", None)  # the app's Animations switch decides, not the model
     # Local models write ~10 slides per answer whatever they are asked; retrying the whole deck
     # doesn't change that, so a short deck is topped up with batches of new slides instead.
     target = slides if slide_mode == "min" else int(slides * 0.9) if slide_mode == "exact" else 0
     if slides > 0 and len(spec["slides"]) < target:
         extend(model, spec, work, content, target, extra)
+    scripted = set()
+    for i, part in enumerate(parts):
+        if i:  # ponytail: the closing slide only sums up part 1; rewrite it in the editor if needed
+            log.info("reading part %d of %d of the source", i + 1, len(parts))
+            extend(model, spec, work, part, len(spec["slides"]) + share[i], extra)
+        new = [s for s in spec["slides"] if id(s) not in scripted]
+        add_scripts(model, spec.get("title", ""), new, part, extra, art)
+        scripted |= {id(s) for s in new}
+    content = full
+    if n := diversify(spec):
+        log.info("turned %d plain bullet slides into cards / steps", n)
+    n_art = add_art(spec, work) if art else 0
     slides = spec["slides"]  # drop section dividers with nothing after them
     spec["slides"] = [s for i, s in enumerate(slides) if not (
         s.get("type") == "section" and
@@ -1637,6 +1830,7 @@ def auto(files: list[Path], out: Path | None, model: str, slides: int, extra: st
         f"Slides: {model_label(model)}",
         f"Images: {', '.join(model_label(m) for m in sorted(VISION_USED)) or 'none'}",
         f"OCR: {', '.join(sorted(OCR_USED)) or 'none'}",
+        f"Art: ComfyUI (local), {n_art} pictures" if n_art else "",
         f"Design: {FAMILIES[design]['name']}" if design in FAMILIES else ""]))
     apply_design(spec, design)
     spec_path.write_text(json.dumps(spec, indent=2, ensure_ascii=False), encoding="utf-8")
@@ -1701,6 +1895,7 @@ def main() -> None:
     a.add_argument("-i", "--instructions", default="", help='e.g. "audience: management, focus on costs"')
     a.add_argument("--no-preview", action="store_true")
     a.add_argument("--no-animate", action="store_true", help="no fade transitions/animations")
+    a.add_argument("--art", action="store_true", help="draw slide pictures with local ComfyUI (see imagegen.py)")
     a.add_argument("--design", choices=list(FAMILIES), help="design family (see DESIGN_NOTES.md)")
     sub.add_parser("schema", help="print the slide spec format")
     sub.add_parser("families", help="render a preview of every design family (ui/families/*.jpg)")
@@ -1715,11 +1910,11 @@ def main() -> None:
     elif args.cmd == "auto":
         auto(args.files, args.out, args.model, args.slides, args.instructions, not args.no_preview,
              not args.no_animate, None if args.no_vision else args.vision, design=args.design,
-             slide_mode="min" if args.at_least else "exact")
+             slide_mode="min" if args.at_least else "exact", art=args.art)
     elif args.cmd == "families":
         render_family_thumbnails()
     else:
-        print(SCHEMA)
+        print(SCHEMA + "\n" + SCHEMA_EXTRA)
 
 
 if __name__ == "__main__":

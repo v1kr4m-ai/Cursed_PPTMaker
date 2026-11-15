@@ -157,8 +157,8 @@ class Api:
     def _on_line(self, text: str, level: str) -> None:
         self._push({"type": "log", "text": text, "level": level})
         low = text.lower()
-        for key, stage in (("extracting", "read"), ("describing", "look"),
-                           ("asking", "write"), ("deck:", "render")):
+        for key, stage in (("extracting", "read"), ("describing", "look"), ("drawing", "write"),
+                           ("starting comfyui", "write"), ("asking", "write"), ("deck:", "render")):
             if low.startswith(key) or f" {key}" in low[:12]:
                 self._push({"type": "stage", "stage": stage, "detail": text})
                 break
@@ -413,7 +413,13 @@ class Api:
                 work = outdir / f"{files[0].stem}_ppt"
                 deck = mp.auto(files, free_path(outdir / files[0].name), opts["model"], int(opts["slides"]),
                                opts.get("focus", "").strip(), True, opts.get("animate", True),
-                               opts.get("vision", "auto") or None, work, design, opts.get("slide_mode", "exact"))
+                               opts.get("vision", "auto") or None, work, design, opts.get("slide_mode", "exact"),
+                               confirm=lambda asked, needed: self._window.create_confirmation_dialog(
+                                   "More slides needed",
+                                   f"This material looks like it needs about {needed} slides to cover properly, "
+                                   f"but {asked} were asked for.\n\nOK = make about {needed} slides.\n"
+                                   f"Cancel = keep {asked}; the detail that does not fit goes into the speaker notes."),
+                               art=bool(opts.get("art")))
                 spec = work / "spec.json"
             from pptx import Presentation
             self._push({"type": "done", "deck": str(deck), "name": deck.name, "folder": str(deck.parent),
