@@ -298,3 +298,10 @@
 - UI: "Slide pictures (local ComfyUI)" switch in settings (off by default); CLI: --art.
 - Measured on RTX 5060 laptop: SDXL 22 s per picture; picture lands in the card beside the bullets.
 - Tested: real draw, add_art on 2 slides, render of the slide. Full app run with a text model not done.
+
+## 2026-11-15 — End-to-end run fixes
+- Full CLI run (qwen2.5:7b, --art, 8 slides, small English source): animations on, scripts with
+  references, 3 ComfyUI pictures. Found: English source came out in Hindi (the prompt's
+  "Hindi source -> Hindi slides" example leaked) -> source_language() now names the language in
+  the prompt. Two slides got no script -> add_scripts() retries slides still without one, once.
+- Re-run: English slides, 7 of 7 slides scripted. Deck-level slide count 8 as asked.

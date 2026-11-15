@@ -1252,8 +1252,8 @@ Rules:
 - Only use image paths listed in the source as ![image](path), copied exactly.
 - Use the "Image description" lines to write titles, captions and bullets for images.
   When the source is mostly images, give each important image its own slide.
-- Write the slides in the same language as the source (Hindi source -> Hindi slides),
-  unless the instructions ask for another language. Keep commands and numbers as they are.
+- Write the slides in {lang}, the language of the source, unless the instructions ask for another
+  language. Keep commands and numbers as they are.
 - Pick the palette that best suits the topic.
 {extra}
 SOURCE DOCUMENTS:
@@ -1593,38 +1593,50 @@ def add_scripts(model: str, title: str, slides: list[dict], content: str, extra:
     in the deck request does not work with local models - they write one-line notes - so it is
     asked separately, a few slides at a time. The source goes first in the prompt so the model
     server can reuse it between requests. A slide keeps its old note if a request fails."""
-    for at in range(0, len(slides), SCRIPT_BATCH):
-        batch = slides[at:at + SCRIPT_BATCH]
-        if "write" in SKIP:
+    got = set()  # slides whose script arrived; a model that answers with too few lines gets one more try
+    for _ in range(2):
+        todo = [s for s in slides if id(s) not in got]
+        for at in range(0, len(todo), SCRIPT_BATCH):
+            batch = todo[at:at + SCRIPT_BATCH]
+            if "write" in SKIP:
+                return
+            checkpoint()
+            log.info("asking %s for the speaker script of %d slides (%d of %d done)", model, len(batch), len(got), len(slides))
+            shown = json.dumps([{k: v for k, v in s.items() if k != "notes" and not k.startswith("_")} for s in batch],
+                               ensure_ascii=False, indent=1)
+            prompt = SCRIPT_PROMPT.format(content=content, title=title, n=len(batch), slides=shown,
+                                          extra=f"HINTS FROM THE USER: {extra}\n" if extra else "",
+                                          art_rule=ART_RULE if art else "",
+                                          reply_shape='{"notes": ["script for slide 1", "..."], "art": ["picture for slide 1", "..."]}'
+                                          if art else '{"notes": ["script for slide 1", "..."]}')
+            try:
+                reply = json.loads(ask_llm(model, prompt))
+            except Skipped:
+                log.info("skipped the remaining speaker scripts")
+                return
+            except json.JSONDecodeError as e:
+                log.warning("no script for %d slides (%s)", len(batch), e)
+                continue
+            notes = reply.get("notes") if isinstance(reply, dict) else reply
+            for s, note in zip(batch, notes if isinstance(notes, list) else []):
+                if text := _text(note).strip():
+                    s["notes"] = text
+                    got.add(id(s))
+            arts = reply.get("art") if isinstance(reply, dict) and art else None
+            for s, line in zip(batch, arts if isinstance(arts, list) else []):
+                if text := _text(line).strip():
+                    s["art"] = text[:200]
+        if len(got) == len(slides):
             return
-        checkpoint()
-        log.info("asking %s for the speaker script of %d slides (%d of %d done)", model, len(batch), at, len(slides))
-        shown = json.dumps([{k: v for k, v in s.items() if k != "notes" and not k.startswith("_")} for s in batch],
-                           ensure_ascii=False, indent=1)
-        prompt = SCRIPT_PROMPT.format(content=content, title=title, n=len(batch), slides=shown,
-                                      extra=f"HINTS FROM THE USER: {extra}\n" if extra else "",
-                                      art_rule=ART_RULE if art else "",
-                                      reply_shape='{"notes": ["script for slide 1", "..."], "art": ["picture for slide 1", "..."]}'
-                                      if art else '{"notes": ["script for slide 1", "..."]}')
-        try:
-            reply = json.loads(ask_llm(model, prompt))
-        except Skipped:
-            log.info("skipped the remaining speaker scripts")
-            return
-        except json.JSONDecodeError as e:
-            log.warning("no script for slides %d-%d (%s)", at + 1, at + len(batch), e)
-            continue
-        notes = reply.get("notes") if isinstance(reply, dict) else reply
-        for s, note in zip(batch, notes if isinstance(notes, list) else []):
-            if text := _text(note).strip():
-                s["notes"] = text
-        arts = reply.get("art") if isinstance(reply, dict) and art else None
-        for s, line in zip(batch, arts if isinstance(arts, list) else []):
-            if text := _text(line).strip():
-                s["art"] = text[:200]
 
 
 MAX_ART = 12  # pictures per deck: ~30-60 s each on a laptop GPU
+
+
+def source_language(text: str) -> str:
+    """The deck language the prompt names outright; a 7B model otherwise drifts into Hindi."""
+    letters = [c for c in text if c.isalpha()]
+    return "Hindi" if letters and sum("ऀ" <= c <= "ॿ" for c in letters) / len(letters) > 0.2 else "English"
 
 
 def unload_ollama() -> None:
@@ -1757,7 +1769,7 @@ def auto(files: list[Path], out: Path | None, model: str, slides: int, extra: st
         log.info("the source is long (%d chars): reading it in %d parts", len(content), len(parts))
         slides, slide_mode = share[0], "exact"
     full, content = content, parts[0]
-    prompt = PROMPT.format(schema=SCHEMA, count=count_rule(slides, slide_mode), content=content,
+    prompt = PROMPT.format(schema=SCHEMA, count=count_rule(slides, slide_mode), content=content, lang=source_language(full),
                            extra=(f"- This is part 1 of {len(parts)} of the source; the other parts get their own "
                                   f"slides later.\n" if len(parts) > 1 else "") +
                            (f"\nHINTS FROM THE USER (follow them; they override the rules above):\n{extra}\n"
