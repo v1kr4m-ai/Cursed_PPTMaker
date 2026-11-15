@@ -305,3 +305,10 @@
   "Hindi source -> Hindi slides" example leaked) -> source_language() now names the language in
   the prompt. Two slides got no script -> add_scripts() retries slides still without one, once.
 - Re-run: English slides, 7 of 7 slides scripted. Deck-level slide count 8 as asked.
+
+## 2026-11-15 — Speaker script is a switch
+- Settings switch "Speaker script and references" (default on); CLI --no-script. Off = no script pass,
+  planning-time notes dropped; pictures on + script off = the pass only asks for picture lines.
+- Hints are passed to the script pass ("follow them for tone, length and language"). A hint that
+  mentions script / speaker / narration / notes turns the script on even when the switch is off.
+- test_make_ppt.py covers both paths with a stubbed model.

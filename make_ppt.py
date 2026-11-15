@@ -1568,19 +1568,22 @@ SCRIPT_PROMPT = """SOURCE DOCUMENTS:
 
 END OF THE SOURCE.
 
-You write the speaker script for slides of the deck "{title}", which was made from the source above.
-For each slide below, write what the presenter says aloud while it is on screen: 4 to 7 full
-sentences that explain the slide, using the detail from the source that did not fit on the slide.
-Do not just read the slide text out and do not mention slide numbers. Use only facts from the source. Write in the language of the slide.
-End every script with a last line "Reference: ..." naming where in the source it comes from
-(file name and page number or heading).
-{extra}
+You work on slides of the deck "{title}", which was made from the source above.
+{script_rule}{extra}
 {art_rule}Reply with ONLY a JSON object {reply_shape} holding exactly
 {n} strings per list, in the order of the slides.
 
 SLIDES:
 {slides}"""
 
+SCRIPT_RULE = """For each slide below, write the speaker script: what the presenter says aloud while it is on
+screen, 4 to 7 full sentences that explain the slide, using the detail from the source that did not fit
+on it. Do not just read the slide text out and do not mention slide numbers. Use only facts from the
+source. Write in the language of the slide.
+End every script with a last line "Reference: ..." naming where in the source it comes from
+(file name and page number or heading).
+"""
+SCRIPT_HINT = re.compile(r"\b(scripts?|speaker|narrat\w*|talking points|notes)\b", re.I)  # a hint asking for one turns it on
 SCRIPT_BATCH = 5  # slides per script request
 
 
@@ -1588,7 +1591,8 @@ ART_RULE = ('Also write an "art" line for each slide: 8-15 English words describ
             'for it (objects and scene; no text, no letters, no faces), even if the slide is not in English.\n')
 
 
-def add_scripts(model: str, title: str, slides: list[dict], content: str, extra: str, art: bool = False) -> None:
+def add_scripts(model: str, title: str, slides: list[dict], content: str, extra: str, art: bool = False,
+                script: bool = True) -> None:
     """Second pass: a speaker script + source reference in every slide's notes. Asking for this
     in the deck request does not work with local models - they write one-line notes - so it is
     asked separately, a few slides at a time. The source goes first in the prompt so the model
@@ -1605,10 +1609,10 @@ def add_scripts(model: str, title: str, slides: list[dict], content: str, extra:
             shown = json.dumps([{k: v for k, v in s.items() if k != "notes" and not k.startswith("_")} for s in batch],
                                ensure_ascii=False, indent=1)
             prompt = SCRIPT_PROMPT.format(content=content, title=title, n=len(batch), slides=shown,
-                                          extra=f"HINTS FROM THE USER: {extra}\n" if extra else "",
-                                          art_rule=ART_RULE if art else "",
-                                          reply_shape='{"notes": ["script for slide 1", "..."], "art": ["picture for slide 1", "..."]}'
-                                          if art else '{"notes": ["script for slide 1", "..."]}')
+                                          extra=f"HINTS FROM THE USER (follow them for tone, length and language): {extra}\n" if extra else "",
+                                          script_rule=SCRIPT_RULE if script else "", art_rule=ART_RULE if art else "",
+                                          reply_shape="{" + ", ".join(f'"{k}": ["{v} for slide 1", "..."]' for k, v, on in (
+                                              ("notes", "script", script), ("art", "picture", art)) if on) + "}")
             try:
                 reply = json.loads(ask_llm(model, prompt))
             except Skipped:
@@ -1617,7 +1621,7 @@ def add_scripts(model: str, title: str, slides: list[dict], content: str, extra:
             except json.JSONDecodeError as e:
                 log.warning("no script for %d slides (%s)", len(batch), e)
                 continue
-            notes = reply.get("notes") if isinstance(reply, dict) else reply
+            notes = (reply.get("notes") if isinstance(reply, dict) else reply) if script else []
             for s, note in zip(batch, notes if isinstance(notes, list) else []):
                 if text := _text(note).strip():
                     s["notes"] = text
@@ -1626,7 +1630,7 @@ def add_scripts(model: str, title: str, slides: list[dict], content: str, extra:
             for s, line in zip(batch, arts if isinstance(arts, list) else []):
                 if text := _text(line).strip():
                     s["art"] = text[:200]
-        if len(got) == len(slides):
+        if not script or len(got) == len(slides):
             return
 
 
@@ -1741,7 +1745,7 @@ def count_rule(slides: int, mode: str) -> str:
 def auto(files: list[Path], out: Path | None, model: str, slides: int, extra: str,
          preview: bool, animate: bool = True, vision: str | None = "auto",
          workdir: Path | None = None, design: str | None = None, slide_mode: str = "exact",
-         confirm=None, art: bool = False) -> Path:
+         confirm=None, art: bool = False, script: bool = True) -> Path:
     """confirm(asked, needed) -> bool: called when the source looks too big for the slides asked
     for; True = make `needed` slides instead. None (the CLI) = keep the number and warn."""
     if is_online(model):
@@ -1807,6 +1811,12 @@ def auto(files: list[Path], out: Path | None, model: str, slides: int, extra: st
                  f"(non-thinking models such as qwen2.5 or phi4 are the most reliable), fewer slides, or "
                  f"fix the last attempt by hand ({spec_path}) and run: make_ppt.py build \"{spec_path}\"")
     spec = usable
+    if not script and SCRIPT_HINT.search(extra):
+        script = True
+        log.info("your hints ask for a script, so speaker scripts are on")
+    if not script:  # the deck request itself writes short notes; they are not a script
+        for s in spec["slides"]:
+            s.pop("notes", None)
     spec.pop("animate", None)  # the app's Animations switch decides, not the model
     # Local models write ~10 slides per answer whatever they are asked; retrying the whole deck
     # doesn't change that, so a short deck is topped up with batches of new slides instead.
@@ -1819,7 +1829,8 @@ def auto(files: list[Path], out: Path | None, model: str, slides: int, extra: st
             log.info("reading part %d of %d of the source", i + 1, len(parts))
             extend(model, spec, work, part, len(spec["slides"]) + share[i], extra)
         new = [s for s in spec["slides"] if id(s) not in scripted]
-        add_scripts(model, spec.get("title", ""), new, part, extra, art)
+        if script or art:
+            add_scripts(model, spec.get("title", ""), new, part, extra, art, script)
         scripted |= {id(s) for s in new}
     content = full
     if n := diversify(spec):
@@ -1907,6 +1918,7 @@ def main() -> None:
     a.add_argument("-i", "--instructions", default="", help='e.g. "audience: management, focus on costs"')
     a.add_argument("--no-preview", action="store_true")
     a.add_argument("--no-animate", action="store_true", help="no fade transitions/animations")
+    a.add_argument("--no-script", action="store_true", help="no speaker script / references in the notes")
     a.add_argument("--art", action="store_true", help="draw slide pictures with local ComfyUI (see imagegen.py)")
     a.add_argument("--design", choices=list(FAMILIES), help="design family (see DESIGN_NOTES.md)")
     sub.add_parser("schema", help="print the slide spec format")
@@ -1922,7 +1934,7 @@ def main() -> None:
     elif args.cmd == "auto":
         auto(args.files, args.out, args.model, args.slides, args.instructions, not args.no_preview,
              not args.no_animate, None if args.no_vision else args.vision, design=args.design,
-             slide_mode="min" if args.at_least else "exact", art=args.art)
+             slide_mode="min" if args.at_least else "exact", art=args.art, script=not args.no_script)
     elif args.cmd == "families":
         render_family_thumbnails()
     else:

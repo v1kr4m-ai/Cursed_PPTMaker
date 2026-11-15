@@ -419,7 +419,7 @@ class Api:
                                    f"This material looks like it needs about {needed} slides to cover properly, "
                                    f"but {asked} were asked for.\n\nOK = make about {needed} slides.\n"
                                    f"Cancel = keep {asked}; the detail that does not fit goes into the speaker notes."),
-                               art=bool(opts.get("art")))
+                               art=bool(opts.get("art")), script=opts.get("script", True))
                 spec = work / "spec.json"
             from pptx import Presentation
             self._push({"type": "done", "deck": str(deck), "name": deck.name, "folder": str(deck.parent),
