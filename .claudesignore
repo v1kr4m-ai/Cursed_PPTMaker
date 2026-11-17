@@ -1,0 +1,34 @@
+# Dependency folders
+node_modules/
+bower_components/
+
+# Build and distribution directories
+dist/
+build/
+.next/
+.nuxt/
+out/
+.cache/
+
+# Version control and IDE files
+.git/
+.svn/
+.idea/
+.vscode/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.swp
+
+# Python environments (if applicable)
+venv/
+.venv/
+env/
+__pycache__/
+*.pyc
+
+# Local system or graphify output files
+graph.html
+graph.json
+GRAPH_REPORT.md
